@@ -1,0 +1,40 @@
+{
+  "build": {
+    "beforeDevCommand": "trunk serve",
+    "beforeBuildCommand": "trunk build",
+    "devPath": "http://localhost:1420",
+    "distDir": "../dist",
+    "withGlobalTauri": true
+  },
+  "package": {
+    "productName": "llm-playground",
+    "version": "0.0.0"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": false,
+      "shell": {
+        "all": false,
+        "open": true
+      }
+    },
+    "windows": [
+      {
+        "title": "llm-playground",
+        "width": 500,
+        "height": 650
+      }
+    ],
+    "security": {
+      "csp": null
+    },
+    "bundle": {
+      "active": true,
+      "targets": "all",
+      "identifier": "com.tauri.dev",
+      "icon": [
+        "icons/icon.ico"
+      ]
+    }
+  }
+}

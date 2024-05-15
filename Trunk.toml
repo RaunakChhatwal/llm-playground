@@ -1,0 +1,15 @@
+[[hooks]]
+stage = "pre_build"
+command = "sh"
+command_arguments = ["-c", "npx tailwindcss -i input.css -o public/index.css"]
+
+[build]
+target = "./index.html"
+
+[watch]
+ignore = ["./src-tauri"]
+
+[serve]
+address = "127.0.0.1"
+port = 1420
+open = false

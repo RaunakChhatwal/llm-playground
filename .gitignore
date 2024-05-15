@@ -1,0 +1,6 @@
+/dist/
+/public/index.css
+/target/
+/Cargo.lock
+/.vscode
+/shell.nix
