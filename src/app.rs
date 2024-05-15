@@ -1,7 +1,4 @@
-use leptos::leptos_dom::ev::SubmitEvent;
 use leptos::*;
-use serde::{Deserialize, Serialize};
-use serde_wasm_bindgen::to_value;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -10,68 +7,50 @@ extern "C" {
     async fn invoke(cmd: &str, args: JsValue) -> JsValue;
 }
 
-#[derive(Serialize, Deserialize)]
-struct GreetArgs<'a> {
-    name: &'a str,
+#[component]
+fn Button(class: &'static str, label: &'static str) -> impl IntoView {
+    let class = format!("{class} px-2 py-1 border border-gray-300 hover:bg-[#333333]");
+    view! {
+        <button class={class} >{label}</button>
+    }
+}
+
+#[component]
+fn PromptBox() -> impl IntoView {
+    let prompt = create_rw_signal(String::new());
+
+    let on_input = move |_| {
+        let prompt_box = document().get_element_by_id("prompt-box")
+            .expect("The current element should always exist.");
+        prompt_box.set_attribute("style", "height: auto;")
+            .expect("The style attribute is available for every element.");
+        prompt_box.set_attribute("style", &format!("height: {}px", prompt_box.scroll_height()))
+            .expect("The style attribute is available for every element.");
+    };
+
+    view! {
+        <textarea
+            id="prompt-box"
+            class="w-full px-2 py-1 bg-[#222222] text-[0.9em] overflow-hidden resize-none"
+            type="text"
+            placeholder="Enter a prompt here."
+            on:input=on_input
+        >{prompt}</textarea>
+    }
 }
 
 #[component]
 pub fn App() -> impl IntoView {
-    let (name, set_name) = create_signal(String::new());
-    let (greet_msg, set_greet_msg) = create_signal(String::new());
-
-    let update_name = move |ev| {
-        let v = event_target_value(&ev);
-        set_name.set(v);
-    };
-
-    let greet = move |ev: SubmitEvent| {
-        ev.prevent_default();
-        spawn_local(async move {
-            let name = name.get_untracked();
-            if name.is_empty() {
-                return;
-            }
-
-            let args = to_value(&GreetArgs { name: &name }).unwrap();
-            // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
-            let new_msg = invoke("greet", args).await.as_string().unwrap();
-            set_greet_msg.set(new_msg);
-        });
-    };
-
     view! {
-        <main class="container">
-            <div class="row">
-                <a href="https://tauri.app" target="_blank">
-                    <img src="public/tauri.svg" class="logo tauri" alt="Tauri logo"/>
-                </a>
-                <a href="https://docs.rs/leptos/" target="_blank">
-                    <img src="public/leptos.svg" class="logo leptos" alt="Leptos logo"/>
-                </a>
+        <div class="flex flex-col h-full p-4 text-[0.9rem]">
+            <div class="flex flex-col">
+                <PromptBox />
             </div>
-
-            <p>"Click on the Tauri and Leptos logos to learn more."</p>
-
-            <p>
-                "Recommended IDE setup: "
-                <a href="https://code.visualstudio.com/" target="_blank">"VS Code"</a>
-                " + "
-                <a href="https://github.com/tauri-apps/tauri-vscode" target="_blank">"Tauri"</a>
-                " + "
-                <a href="https://github.com/rust-lang/rust-analyzer" target="_blank">"rust-analyzer"</a>
-            </p>
-
-            <form class="row" on:submit=greet>
-                <input
-                    id="greet-input"
-                    placeholder="Enter a name..."
-                    on:input=update_name
-                />
-                <button type="submit">"Greet"</button>
-            </form>
-
-            <p><b>{ move || greet_msg.get() }</b></p>
-        </main>
+            <div class="flex mt-auto p-2">
+                <Button class="mr-4" label="New" />
+                <Button class="" label="Submit" />
+                <Button class="ml-auto" label="Settings" />
+            </div>
+        </div>
     }
 }

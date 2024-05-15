@@ -20,7 +20,7 @@
     },
     "windows": [
       {
-        "title": "llm-playground",
+        "title": "Chat Playground",
         "width": 500,
         "height": 650
       }
