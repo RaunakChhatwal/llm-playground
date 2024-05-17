@@ -5,3 +5,7 @@
 textarea:focus {
     outline: none;
 }
+
+p {
+    white-space: pre-wrap;
+}
