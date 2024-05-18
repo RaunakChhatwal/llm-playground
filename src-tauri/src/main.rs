@@ -3,9 +3,9 @@
 
 use std::path::Path;
 use anyhow::{anyhow, Context, Result};
-use config::Config;
+use util::Config;
 
-mod config;
+mod util;
 
 fn config_path() -> Result<std::path::PathBuf> {
     let config_dir = dirs::config_dir()

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 pub enum Provider {
     OpenAI,
     Anthropic
@@ -20,4 +20,10 @@ pub struct Config {
     pub model: String,
     pub api_key: Option<usize>,
     pub api_keys: Vec<APIKey>
+}
+
+#[derive(Clone)]
+pub struct Exchange {
+    pub user_message: String,
+    pub assistant_message: String
 }

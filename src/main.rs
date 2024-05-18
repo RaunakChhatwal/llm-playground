@@ -1,5 +1,5 @@
 mod fetch_tokens;
-mod config;
+mod util;
 mod app;
 
 use app::*;

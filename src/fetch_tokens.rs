@@ -4,7 +4,7 @@ use reqwest::{header::{HeaderMap, HeaderValue, CONTENT_TYPE}, RequestBuilder};
 use reqwest_eventsource::{Event, EventSource};
 use serde_json::{json, Value};
 
-use crate::config::{Config, Provider};
+use crate::util::{Config, Exchange, Provider};
 
 fn build_openai_request(key: &str) -> Result<RequestBuilder> {
     let mut headers = HeaderMap::new();
@@ -18,9 +18,9 @@ fn build_openai_request(key: &str) -> Result<RequestBuilder> {
     return Ok(request_builder);
 }
 
-fn build_anthropic_request(key: &str) -> RequestBuilder {
+fn build_anthropic_request(key: &str) -> Result<RequestBuilder> {
     let mut headers = HeaderMap::new();
-    headers.insert("x-api-key", HeaderValue::from_str(key).unwrap());
+    headers.insert("x-api-key", HeaderValue::from_str(key)?);
     headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
@@ -28,13 +28,13 @@ fn build_anthropic_request(key: &str) -> RequestBuilder {
         .post("https://api.anthropic.com/v1/messages")
         .headers(headers);
 
-    return request_builder;
+    return Ok(request_builder);
 }
 
 fn build_request_body(
     prompt: &str,
     config: &Config,
-    exchanges: Vec<(String, String)>,
+    exchanges: Vec<Exchange>,
 ) -> serde_json::Value {
     return json!({
         "model": config.model,
@@ -43,7 +43,7 @@ fn build_request_body(
         "stream": true,
         "messages": exchanges
             .iter()
-            .flat_map(|(user_message, assistant_message)|
+            .flat_map(|Exchange { user_message, assistant_message }|
                 vec![json!({
                     "role": "user",
                     "content": user_message
@@ -106,7 +106,7 @@ fn interpret_message(
 pub fn fetch_tokens(
     prompt: &str,
     config: &Config,
-    exchanges: Vec<(String, String)>,
+    exchanges: Vec<Exchange>,
 ) -> Result<impl Stream<Item = Result<Option<String>>>> {
     let api_key = config.api_keys[
         config.api_key.ok_or(anyhow!("No API Key selected."))?
@@ -116,7 +116,7 @@ pub fn fetch_tokens(
     let request_builder = match api_key.provider {
         Provider::OpenAI => build_openai_request(&api_key.key)?
             .body(body.to_string()),
-        Provider::Anthropic => build_anthropic_request(&api_key.key)
+        Provider::Anthropic => build_anthropic_request(&api_key.key)?
             .body(body.to_string()),
     };
 
