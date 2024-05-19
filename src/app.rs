@@ -1,12 +1,11 @@
 use std::sync::Mutex;
-
 use anyhow::{anyhow, Context, Result};
-use futures::{Stream, StreamExt};
+use futures::{channel::mpsc::UnboundedReceiver, SinkExt, StreamExt};
 use leptos::*;
+use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::to_value;
 use wasm_bindgen::prelude::*;
-
-use crate::{util::{Config, Exchange}, fetch_tokens::fetch_tokens};
+use crate::util::{Config, Exchange};
 
 #[wasm_bindgen]
 extern "C" {
@@ -18,7 +17,7 @@ extern "C" {
 fn Button(
     class: &'static str,
     label: &'static str,
-    to_hide: ReadSignal<bool>,
+    to_hide: Signal<bool>,
     on_click: Box<dyn Fn()>)
 -> impl IntoView {
     let class = format!("{class}
@@ -68,11 +67,16 @@ fn PromptBox(
     }
 }
 
-async fn build_token_stream(
-    prompt: &str,
+#[derive(Deserialize, Serialize)]
+struct FetchTokenArguments {
+    prompt: String,
+    config: Config,
     exchanges: Vec<Exchange>
-) -> Result<impl Stream<Item = Result<Option<String>>>> {
-    let serialized_config = invoke("load_config",
+}
+
+async fn build_token_stream(prompt: String, exchanges: Vec<Exchange>)
+-> Result<UnboundedReceiver<Result<String, String>>> {
+    let serialized_config = invoke("_load_config",
         to_value(&serde_json::Value::Object(serde_json::Map::new()))
         .expect("The empty object should successfully serialize"))
         .await
@@ -81,8 +85,41 @@ async fn build_token_stream(
     let config = serde_json::from_str::<Result<Config, String>>(&serialized_config)
         .context("Unable to parse config")?
         .map_err(|error_message| anyhow!("{error_message}"))?;
-    
-   return fetch_tokens(&prompt, &config, exchanges);
+
+    let args = serde_wasm_bindgen::to_value(&FetchTokenArguments {
+        prompt,
+        config,
+        exchanges
+    }).map_err(|_| anyhow!("Error serializing fetch_token arguments"))?;
+    invoke("_build_token_stream", args).await;
+
+    let (mut sender, recv) = futures::channel::mpsc::unbounded();
+
+    spawn_local(async move { loop {
+        let token = invoke("fetch_tokens", JsValue::null()).await;
+        if token.is_null() {
+            return;
+        }
+
+        let Some(result_str) = token.as_string() else {
+            let _ = sender.send(Err("Error parsing response.".into()));
+            return;
+        };
+
+        match serde_json::from_str::<Result<String, String>>(&result_str) {
+            Ok(token_result) => {
+                if let Err(_) = sender.send(token_result).await {
+                    return;
+                }
+            },
+            Err(error) => {
+                let _ = sender.send(Err(error.to_string())).await;
+                return;
+            }
+        };
+    }});
+
+    return Ok(recv);
 }
 
 #[component]
@@ -114,20 +151,18 @@ pub fn App() -> impl IntoView {
         counter += 1;
 
         spawn_local(async move {
-            let mut token_stream;
-            match build_token_stream(&prompt, exchanges).await {
-                Ok(stream) => token_stream = stream,
+            let mut token_stream = match build_token_stream(prompt, exchanges).await {
+                Ok(token_stream) => token_stream,
                 Err(error) => {
                     set_error(error.to_string());
                     return;
                 }
-            }
+            };
 
             while let Some(token) = token_stream.next().await {
                 match token {
-                    Ok(Some(token)) => new_exchange.update(|exchange|
+                    Ok(token) => new_exchange.update(|exchange|
                         exchange.assistant_message.push_str(&token)),
-                    Ok(None) => break,
                     Err(error) => {
                         set_error(error.to_string());
                         break;
@@ -149,7 +184,7 @@ pub fn App() -> impl IntoView {
     view! {
         <div class="flex flex-col h-full p-4 overflow-y-hidden text-[0.9rem]">
             <p
-                class="mb-2 text-red-400"
+                class="mb-2 text-red-400 text-[0.9em]"
                 style:display=move || error().is_empty().then(|| "None")
             >{error}</p>
             <div
@@ -165,9 +200,9 @@ pub fn App() -> impl IntoView {
                                 class="px-2 py-1 bg-[#222222] text-[0.9em]"
                                 style:margin-top=move || (id > 0).then(|| "12px")
                             >{move || exchange().user_message}</p>
-                            <p
-                                class="mt-[12px] px-2 py-1 min-h-6 bg-[#222222] text-[0.9em]"
-                            >{move || exchange().assistant_message}</p>
+                            <p class="mt-[12px] px-2 py-1 min-h-6 bg-[#222222] text-[0.9em]">
+                                {move || exchange().assistant_message}
+                            </p>
                         }
                     />
                 </div>
@@ -178,10 +213,17 @@ pub fn App() -> impl IntoView {
             >
                 <PromptBox prompt set_prompt />
             </div>
-            <div class="flex px-2">
-                <Button class="mr-4" label="New" to_hide=streaming on_click=Box::new(|| ())/>
-                <Button class="" label="Submit" to_hide=streaming on_click=Box::new(on_submit) />
-                <Button class="ml-auto" label="Settings" to_hide=streaming on_click=Box::new(|| ())/>
+            <div class="flex">
+                <Button class="mr-4" label="New"
+                    to_hide=streaming.into() on_click=Box::new(|| ())/>
+                <Button class="" label="Submit"
+                    to_hide=streaming.into() on_click=Box::new(on_submit) />
+                <div class="flex ml-auto">
+                    <Button class="mr-4" label="Cancel"
+                        to_hide=Signal::derive(move || !streaming()) on_click=Box::new(|| ())/>
+                    <Button class="" label="Settings"
+                        to_hide=create_signal(false).0.into() on_click=Box::new(|| ())/>
+                </div>
             </div>
         </div>
     }

@@ -1,4 +1,3 @@
-mod fetch_tokens;
 mod util;
 mod app;
 
