@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 use anyhow::{anyhow, Context, Result};
-use futures::{channel::mpsc::UnboundedReceiver, SinkExt, StreamExt};
+use futures::{channel::mpsc::UnboundedReceiver, FutureExt, SinkExt, StreamExt};
 use leptos::*;
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::to_value;
@@ -223,7 +223,8 @@ pub fn App() -> impl IntoView {
                     to_hide=streaming.into() on_click=fn_mut_to_fn(on_submit) />
                 <div class="flex ml-auto">
                     <Button class="mr-4" label="Cancel"
-                        to_hide=Signal::derive(move || !streaming()) on_click=Box::new(|| ())/>
+                        to_hide=Signal::derive(move || !streaming()) on_click=Box::new(||
+                            spawn_local(invoke("cancel", JsValue::null()).map(|_| ()))) />
                     <Button class="" label="Settings"
                         to_hide=create_signal(false).0.into() on_click=Box::new(|| ())/>
                 </div>

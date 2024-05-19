@@ -4,7 +4,7 @@ use lazy_static::lazy_static;
 use reqwest::{header::{HeaderMap, HeaderValue, CONTENT_TYPE}, RequestBuilder};
 use reqwest_eventsource::{Event, EventSource};
 use serde_json::{json, Value};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use crate::util::{APIKey, Config, Exchange, Provider};
 
 fn build_request(api_key: &APIKey) -> Result<RequestBuilder> {
@@ -117,6 +117,10 @@ lazy_static! {
     };
 }
 
+lazy_static! {
+    static ref CANCEL_NOTIFY: Notify = Notify::new();
+}
+
 pub fn build_token_stream(
     prompt: &str,
     config: &Config,
@@ -129,27 +133,58 @@ pub fn build_token_stream(
         .body(build_request_body(prompt, config, exchanges));
 
     let mut event_source = EventSource::new(request_builder)?;
+    let mut sender = CHANNEL.0.clone();
     tokio::spawn(async move {
-        while let Some(event) = event_source.next().await {
-            let token = match event {
-                Ok(Event::Open) => Some(Ok("".into())),
-                Ok(Event::Message(message)) => interpret_message(message, api_key.provider),
-                Err(reqwest_eventsource::Error::StreamEnded) => None,
-                Err(error) => Some(Err(error.into()))
-            };
-            let whether_stop = token.is_none();
+        loop {
+            tokio::select! {
+                _ = CANCEL_NOTIFY.notified() => {
+                    let _ = sender.send(None).await;
+                    event_source.close();
+                    break;
+                }
+                event = event_source.next() => {
+                    let Some(event) = event else {
+                        let _ = sender.send(None).await;
+                        event_source.close();
+                        break;
+                    };
 
-            let mut sender = CHANNEL.0.clone();
-            if let Err(_) = sender.send(token).await {
-                break;
-            }
+                    let token = match event {
+                        Ok(Event::Open) => Some(Ok("".into())),
+                        Ok(Event::Message(message)) =>
+                            interpret_message(message, api_key.provider),
+                        Err(reqwest_eventsource::Error::StreamEnded) => None,
+                        Err(error) => Some(Err(error.into()))
+                    };
+                    let whether_stop = token.is_none();
 
-            if whether_stop {
-                event_source.close();
-                break;
+                    if let Err(_) = sender.send(token).await {
+                        event_source.close();
+                        break;
+                    }
+
+                    if whether_stop {
+                        event_source.close();
+                        break;
+                    }
+                }
             }
         }
     });
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn fetch_tokens() -> Option<String> {
+    let mut recv = CHANNEL.1.lock().await;
+    let option_token = recv.next().await.expect("The channel is 'static");
+    return option_token.map(|token|
+        serde_json::to_string(&token.map_err(|error| error.to_string()))
+            .expect("Result<String, String> should always serialize."));
+}
+
+#[tauri::command]
+pub fn cancel() {
+    CANCEL_NOTIFY.notify_waiters();
 }

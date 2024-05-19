@@ -3,8 +3,7 @@
 
 use std::path::Path;
 use anyhow::{anyhow, Context, Result};
-use fetch_tokens::{build_token_stream, CHANNEL};
-use futures::StreamExt;
+use fetch_tokens::{build_token_stream, cancel, fetch_tokens};
 use crate::util::{Config, Exchange};
 
 mod util;
@@ -77,20 +76,12 @@ fn _build_token_stream(
         .err()
 }
 
-#[tauri::command]
-async fn fetch_tokens() -> Option<String> {
-    let mut recv = CHANNEL.1.lock().await;
-    let option_token = recv.next().await.expect("The channel is 'static");
-    return option_token.map(|token|
-        serde_json::to_string(&token.map_err(|error| error.to_string()))
-            .expect("Result<String, String> should always serialize."));
-}
-
 #[tokio::main]
 async fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             _build_token_stream,
+            cancel,
             fetch_tokens,
             _load_config,
             save_config
