@@ -49,11 +49,15 @@ fn PromptBox(
 
     // this is a hack because value=prompt entry in the view macro below does not work
     create_effect(move |_| {
-        document().get_element_by_id("prompt-box")
+        let prompt_box = document().get_element_by_id("prompt-box")
             .expect("This element exists.")
             .dyn_into::<web_sys::HtmlTextAreaElement>()
-            .expect("prompt-box is a textarea element.")
-            .set_value(&prompt());
+            .expect("prompt-box is a textarea element.");
+        prompt_box.set_value(&prompt());
+        prompt_box.set_attribute("style", "height: auto;")
+            .expect("The style attribute is available for every element.");
+        prompt_box.set_attribute("style", &format!("height: {}px;", prompt_box.scroll_height()))
+            .expect("The style attribute is available for every element.");
     });
 
     view! {
@@ -158,7 +162,7 @@ pub fn App() -> impl IntoView {
         counter.update(|counter| *counter += 1);
 
         spawn_local(async move {
-            let mut token_stream = match build_token_stream(prompt, exchanges).await {
+            let mut token_stream = match build_token_stream(prompt.clone(), exchanges).await {
                 Ok(token_stream) => token_stream,
                 Err(error) => {
                     set_error(error.to_string());
@@ -175,6 +179,14 @@ pub fn App() -> impl IntoView {
                         break;
                     }
                 }
+            }
+
+            if new_exchange().assistant_message.is_empty() {
+                new_exchange.dispose();
+                set_exchanges.update(|exchanges| {
+                    let _ = exchanges.pop();
+                });
+                set_prompt(prompt);
             }
 
             set_streaming(false);
@@ -207,13 +219,13 @@ pub fn App() -> impl IntoView {
                     />
                 </div>
             </div>
-            <div
-                class=move || (exchanges().is_empty() && !streaming())
-                    .then(|| "mb-auto").unwrap_or("mt-auto mb-2")
-            >
-                <PromptBox prompt set_prompt />
+            <div class=move || format!("flex-none {} max-h-[50vh] overflow-y-auto",
+                (exchanges().is_empty() && !streaming()).then(|| "mb-auto").unwrap_or("mt-auto mb-2"))>
+                <div class="flex flex-col">
+                    <PromptBox prompt set_prompt />
+                </div>
             </div>
-            <div class="flex">
+            <div class="flex-none flex">
                 <Button class="mr-4" label="New" to_hide=streaming.into()
                     on_click=Box::new(move || {
                         counter.set(0);
