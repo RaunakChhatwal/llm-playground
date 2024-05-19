@@ -122,16 +122,23 @@ async fn build_token_stream(prompt: String, exchanges: Vec<Exchange>)
     return Ok(recv);
 }
 
+fn fn_mut_to_fn(f: Mutex::<Box<dyn FnMut()>>) -> Box<dyn Fn()> {
+    return Box::new(move || match f.try_lock() {
+        Ok(mut f) => f(),
+        Err(_) => return
+    });
+}
+
 #[component]
 pub fn App() -> impl IntoView {
     let (error, set_error) = create_signal("".to_string());
-    let mut counter = 0usize;
+    let counter = create_rw_signal(0);
     let (exchanges, set_exchanges) = create_signal(Vec::<(usize, RwSignal<Exchange>)>::new());
     let (prompt, set_prompt) = create_signal("".to_string());
     let (streaming, set_streaming) = create_signal(false);
 
-    // wrapped around Mutex because on_submit must be Fn
-    let on_submit_FnMut = Mutex::<Box<dyn FnMut()>>::new(Box::new(move || {
+    // casting the closure to FnMut because on_submit isn't logically reentrant
+    let on_submit = Mutex::<Box<dyn FnMut()>>::new(Box::new(move || {
         set_streaming(true);
         set_error("".to_string());
         let prompt = prompt();
@@ -147,8 +154,8 @@ pub fn App() -> impl IntoView {
             assistant_message: "".to_string()
         });
         set_exchanges.update(|exchanges|
-            exchanges.push((counter, new_exchange)));
-        counter += 1;
+            exchanges.push((counter.get_untracked(), new_exchange)));
+        counter.update(|counter| *counter += 1);
 
         spawn_local(async move {
             let mut token_stream = match build_token_stream(prompt, exchanges).await {
@@ -173,13 +180,6 @@ pub fn App() -> impl IntoView {
             set_streaming(false);
         });
     }));
-
-    let on_submit = move || {
-        match on_submit_FnMut.try_lock() {
-            Ok(mut on_submit) => on_submit(),
-            Err(_) => return
-        }
-    };
 
     view! {
         <div class="flex flex-col h-full p-4 overflow-y-hidden text-[0.9rem]">
@@ -214,10 +214,13 @@ pub fn App() -> impl IntoView {
                 <PromptBox prompt set_prompt />
             </div>
             <div class="flex">
-                <Button class="mr-4" label="New"
-                    to_hide=streaming.into() on_click=Box::new(|| ())/>
+                <Button class="mr-4" label="New" to_hide=streaming.into()
+                    on_click=Box::new(move || {
+                        counter.set(0);
+                        set_exchanges(Vec::new());      // TODO: investigate whether exchanges' signals need to be disposed
+                    }) />
                 <Button class="" label="Submit"
-                    to_hide=streaming.into() on_click=Box::new(on_submit) />
+                    to_hide=streaming.into() on_click=fn_mut_to_fn(on_submit) />
                 <div class="flex ml-auto">
                     <Button class="mr-4" label="Cancel"
                         to_hide=Signal::derive(move || !streaming()) on_click=Box::new(|| ())/>
