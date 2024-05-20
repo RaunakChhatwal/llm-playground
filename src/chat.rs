@@ -135,7 +135,10 @@ async fn build_token_stream(prompt: String, exchanges: Vec<Exchange>)
         config,
         exchanges
     }).map_err(|_| anyhow!("Error serializing fetch_token arguments"))?;
-    invoke("_build_token_stream", args).await;
+    let error = invoke("_build_token_stream", args).await;
+    if !error.is_null() {
+        return Err(anyhow!("{}", error.as_string().expect("_build_token_stream returns Option<String>")));
+    }
 
     let (mut sender, recv) = futures::channel::mpsc::unbounded();
 
@@ -202,23 +205,19 @@ pub fn Chat(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoVie
         });
 
         spawn_local(async move {
-            let mut token_stream = match build_token_stream(prompt.clone(), exchanges).await {
-                Ok(token_stream) => token_stream,
-                Err(error) => {
-                    set_error(error.to_string());
-                    return;
-                }
-            };
-
-            while let Some(token) = token_stream.next().await {
-                match token {
-                    Ok(token) => set_new_exchange.update(|exchange| exchange.assistant_message
-                        .push_str(&token)),
-                    Err(error) => {
-                        set_error(error.to_string());
-                        break;
-                    }
-                }
+            match build_token_stream(prompt.clone(), exchanges).await {
+                Ok(mut token_stream) =>
+                    while let Some(token) = token_stream.next().await {
+                        match token {
+                            Ok(token) => set_new_exchange.update(|exchange|
+                                exchange.assistant_message.push_str(&token)),
+                            Err(error) => {
+                                set_error(error.to_string());
+                                break;
+                            }
+                        }
+                    },
+                Err(error) => set_error(error.to_string())
             }
 
             let new_exchange = new_exchange.get_untracked();
