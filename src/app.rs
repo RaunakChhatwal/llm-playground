@@ -89,7 +89,11 @@ fn MessageBox(
 }
 
 #[component]
-fn ExchangeComponent(id: usize, exchange: RwSignal<Exchange>) -> impl IntoView {
+fn ExchangeComponent(
+    id: usize,
+    exchange: RwSignal<Exchange>,
+    set_exchanges: WriteSignal<Vec<(usize, RwSignal<Exchange>)>>
+) -> impl IntoView {
     let (user_message, set_user_message) = create_slice(
         exchange, 
         |exchange| exchange.user_message.clone(),
@@ -101,13 +105,25 @@ fn ExchangeComponent(id: usize, exchange: RwSignal<Exchange>) -> impl IntoView {
         |exchange, assistant_message| exchange.assistant_message = assistant_message
     );
 
+    let on_delete = move || {
+        set_exchanges.update(|exchanges|
+            exchanges.retain(|(exchange_id, _)|
+                id != *exchange_id))
+    };
+
     view! {
-        <MessageBox id={format!("message-box-{}", 2*id)} rows=1
-            class={(id > 0).then(|| "mt-[12px]".into()).unwrap_or_default()}
-            placeholder={None}
-            content=user_message set_content=set_user_message />
-        <MessageBox id={format!("message-box-{}", 2*id + 1)} rows=1 placeholder={None}
-            class={"mt-[12px]".into()} content=assistant_message set_content=set_assistant_message />
+        <div class="relative flex flex-col">
+            <button
+                class="absolute top-[-10px] right-[10px] text-[1.5rem] text-[#AAAABB]"
+                on:click=move |_| on_delete()
+            >"-"</button>
+            <MessageBox id={format!("message-box-{}", 2*id)} rows=1
+                class={"".into()}
+                placeholder={None}
+                content=user_message set_content=set_user_message />
+            <MessageBox id={format!("message-box-{}", 2*id + 1)} rows=1 placeholder={None}
+                class={"mt-[12px]".into()} content=assistant_message set_content=set_assistant_message />
+        </div>
     }
 }
 
@@ -250,7 +266,9 @@ pub fn App() -> impl IntoView {
                         each=exchanges
                         key=|exchange| exchange.0
                         children=move |(id, exchange)| view! {
-                            <ExchangeComponent id exchange />
+                            <div style:margin-top=move || (id != exchanges()[0].0).then(|| "12px")>
+                                <ExchangeComponent id exchange set_exchanges />
+                            </div>
                         }
                     />
                 </div>
