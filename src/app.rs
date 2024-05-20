@@ -33,41 +33,81 @@ fn Button(
 }
 
 #[component]
-fn PromptBox(
-    prompt: ReadSignal<String>,
-    set_prompt: WriteSignal<String>,
+fn MessageBox(
+    id: String,
+    rows: usize,
+    class: String,
+    placeholder: Option<String>,
+    content: Signal<String>,
+    set_content: SignalSetter<String>,
 ) -> impl IntoView {
-    let on_input = move |event| {
-        set_prompt(event_target_value(&event));
-        let prompt_box = document().get_element_by_id("prompt-box")
-            .expect("This element exists.");
-        prompt_box.set_attribute("style", "height: auto;")
-            .expect("The style attribute is available for every element.");
-        prompt_box.set_attribute("style", &format!("height: {}px;", prompt_box.scroll_height()))
-            .expect("The style attribute is available for every element.");
+    let on_input = {
+        let id = id.clone();
+        move |event| {
+            set_content(event_target_value(&event));
+            let content_box = document().get_element_by_id(&id)
+                .expect("This element exists.");
+            content_box.set_attribute("style", "height: auto;")
+                .expect("The style attribute is available for every element.");
+            let style = format!("height: {}px;", content_box.scroll_height());
+            content_box.set_attribute("style", &style)
+                .expect("The style attribute is available for every element.");
+        }
     };
 
-    // this is a hack because value=prompt entry in the view macro below does not work
-    create_effect(move |_| {
-        let prompt_box = document().get_element_by_id("prompt-box")
-            .expect("This element exists.")
-            .dyn_into::<web_sys::HtmlTextAreaElement>()
-            .expect("prompt-box is a textarea element.");
-        prompt_box.set_value(&prompt());
-        prompt_box.set_attribute("style", "height: auto;")
-            .expect("The style attribute is available for every element.");
-        prompt_box.set_attribute("style", &format!("height: {}px;", prompt_box.scroll_height()))
-            .expect("The style attribute is available for every element.");
+    // this is a hack because value=content entry in the view macro below does not work
+    create_effect({
+        let id = id.clone();
+            move |_| {
+            let content_box = document().get_element_by_id(&id)
+                .expect("This element exists.")
+                .dyn_into::<web_sys::HtmlTextAreaElement>()
+                .expect("content-box is a textarea element.");
+
+            let content = content();
+            if content_box.value() != content {
+                content_box.set_value(&content);
+                content_box.set_attribute("style", "height: auto;")
+                    .expect("The style attribute is available for every element.");
+                let style = format!("height: {}px;", content_box.scroll_height());
+                content_box.set_attribute("style", &style)
+                    .expect("The style attribute is available for every element.");
+            }
+        }
     });
 
+    let class = format!("{} flex-none w-full min-h-[2em] px-2 py-1
+        bg-[#222222] text-[0.9em] overflow-hidden resize-none", class);
     view! {
-        <textarea
-            id="prompt-box"
-            class="flex-none w-full px-2 py-1 bg-[#222222] text-[0.9em] overflow-hidden resize-none"
+        <textarea id={id} rows={rows}
+            class={class}
             type="text"
-            placeholder="Enter a prompt here."
             on:input=on_input
+            placeholder={placeholder}
         ></textarea>
+    }
+}
+
+#[component]
+fn ExchangeComponent(id: usize, exchange: RwSignal<Exchange>) -> impl IntoView {
+    let (user_message, set_user_message) = create_slice(
+        exchange, 
+        |exchange| exchange.user_message.clone(),
+        |exchange, user_message| exchange.user_message = user_message
+    );
+    let (assistant_message, set_assistant_message) = create_slice(
+        exchange, 
+        |exchange| exchange.assistant_message.clone(),
+        |exchange, assistant_message| exchange.assistant_message = assistant_message
+    );
+
+    view! {
+        <MessageBox id={format!("message-box-{}", 2*id)} rows=1
+            class={(id > 0).then(|| "mt-[12px]".into()).unwrap_or_default()}
+            placeholder={None}
+            content=user_message set_content=set_user_message />
+        <MessageBox id={format!("message-box-{}", 2*id + 1)} rows=1 placeholder={None}
+            class={"mt-[12px]".into()} content=assistant_message set_content=set_assistant_message />
     }
 }
 
@@ -147,7 +187,7 @@ pub fn App() -> impl IntoView {
         set_error("".to_string());
         let prompt = prompt();
         set_prompt("".to_string());
-        let exchanges = exchanges()
+        let exchanges = exchanges.get_untracked()
             .iter()
             .map(|(_, exchange)|
                 exchange())
@@ -181,7 +221,7 @@ pub fn App() -> impl IntoView {
                 }
             }
 
-            if new_exchange().assistant_message.is_empty() {
+            if new_exchange.get_untracked().assistant_message.is_empty() {
                 new_exchange.dispose();
                 set_exchanges.update(|exchanges| {
                     let _ = exchanges.pop();
@@ -208,21 +248,17 @@ pub fn App() -> impl IntoView {
                         each=exchanges
                         key=|exchange| exchange.0
                         children=move |(id, exchange)| view! {
-                            <p
-                                class="px-2 py-1 bg-[#222222] text-[0.9em]"
-                                style:margin-top=move || (id > 0).then(|| "12px")
-                            >{move || exchange().user_message}</p>
-                            <p class="mt-[12px] px-2 py-1 min-h-6 bg-[#222222] text-[0.9em]">
-                                {move || exchange().assistant_message}
-                            </p>
+                            <ExchangeComponent id exchange />
                         }
                     />
                 </div>
             </div>
             <div class=move || format!("flex-none {} max-h-[50vh] overflow-y-auto",
-                (exchanges().is_empty() && !streaming()).then(|| "mb-auto").unwrap_or("mt-auto mb-2"))>
+                (exchanges().is_empty() && !streaming()).then(|| "mb-auto").unwrap_or("mt-auto mb-4"))>
                 <div class="flex flex-col">
-                    <PromptBox prompt set_prompt />
+                    <MessageBox id={"prompt-box".into()} rows=2 class={"".into()}
+                        placeholder={Some("Enter a prompt here.".into())}
+                        content={prompt.into()} set_content={set_prompt.into()} />
                 </div>
             </div>
             <div class="flex-none flex">
