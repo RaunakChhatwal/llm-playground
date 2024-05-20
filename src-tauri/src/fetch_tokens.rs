@@ -71,7 +71,7 @@ fn interpret_message(
                 return None;
             }
 
-            let token_result = serde_json::from_str::<serde_json::Value>(&message.data)
+            let token_result = serde_json::from_str::<Value>(&message.data)
                 .ok()
                 .and_then(|data| {
                     if !data["choices"][0]["finish_reason"].is_null() {
@@ -80,8 +80,7 @@ fn interpret_message(
 
                     data["choices"][0]["delta"]["content"]
                         .as_str()
-                        .map(|token|
-                            token.to_string())
+                        .map(|token| token.to_string())
                 })
                 .ok_or(anyhow!("Error parsing response."));
 
@@ -92,14 +91,12 @@ fn interpret_message(
                 return Some(Ok("".to_string()));
             }
 
-            let token_result = serde_json::from_str::<serde_json::Value>(&message.data)
+            let token_result = serde_json::from_str::<Value>(&message.data)
                 .ok()
-                .and_then(|data| {
-                    data["delta"]["text"]
-                        .as_str()
-                        .map(|token|
-                            token.to_string())
-                })
+                .and_then(|data| data["delta"]["text"]
+                    .as_str()
+                    .map(|token| token.to_string())
+                )
                 .ok_or(anyhow!("Error parsing response."));
 
             return Some(token_result);
@@ -117,60 +114,75 @@ lazy_static! {
     };
 }
 
+async fn clear_channel() {
+    let mut recv = CHANNEL.1.lock().await;
+    while let Ok(Some(token)) = recv.try_next() {
+        drop(token);
+    }
+}
+
 lazy_static! {
     static ref CANCEL_NOTIFY: Notify = Notify::new();
 }
 
-pub fn build_token_stream(
+async fn collect_tokens(
+    mut event_source: EventSource,
+    mut sender: UnboundedSender<Option<Result<String>>>,
+    provider: Provider
+) {
+    loop {
+        tokio::select! {
+            _ = CANCEL_NOTIFY.notified() => {
+                let _ = sender.send(None).await;
+                event_source.close();
+                break;
+            }
+            event = event_source.next() => {
+                let Some(event) = event else {
+                    let _ = sender.send(None).await;
+                    event_source.close();
+                    break;
+                };
+
+                let token = match event {
+                    Ok(Event::Open) => Some(Ok("".into())),
+                    Ok(Event::Message(message)) =>
+                        interpret_message(message, provider),
+                    Err(reqwest_eventsource::Error::StreamEnded) => None,
+                    Err(error) => Some(Err(error.into()))
+                };
+                let whether_stop = token.is_none();
+
+                if let Err(_) = sender.send(token).await {
+                    event_source.close();
+                    break;
+                }
+
+                if whether_stop {
+                    event_source.close();
+                    break;
+                }
+            }
+        }
+    }
+}
+
+pub async fn build_token_stream(
     prompt: &str,
     config: &Config,
     exchanges: Vec<Exchange>
 ) -> Result<()> {
+    clear_channel().await;
+
     let api_key = config.api_keys[config.api_key
         .ok_or(anyhow!("No API Key selected."))?].clone();
 
     let request_builder = build_request(&api_key)?
         .body(build_request_body(prompt, config, exchanges));
 
-    let mut event_source = EventSource::new(request_builder)?;
-    let mut sender = CHANNEL.0.clone();
-    tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                _ = CANCEL_NOTIFY.notified() => {
-                    let _ = sender.send(None).await;
-                    event_source.close();
-                    break;
-                }
-                event = event_source.next() => {
-                    let Some(event) = event else {
-                        let _ = sender.send(None).await;
-                        event_source.close();
-                        break;
-                    };
-
-                    let token = match event {
-                        Ok(Event::Open) => Some(Ok("".into())),
-                        Ok(Event::Message(message)) =>
-                            interpret_message(message, api_key.provider),
-                        Err(reqwest_eventsource::Error::StreamEnded) => None,
-                        Err(error) => Some(Err(error.into()))
-                    };
-                    let whether_stop = token.is_none();
-
-                    if let Err(_) = sender.send(token).await {
-                        event_source.close();
-                        break;
-                    }
-
-                    if whether_stop {
-                        event_source.close();
-                        break;
-                    }
-                }
-            }
-        }
-    });
+    let event_source = EventSource::new(request_builder)?;
+    let sender = CHANNEL.0.clone();
+    tokio::spawn(collect_tokens(event_source, sender, api_key.provider));
 
     Ok(())
 }
