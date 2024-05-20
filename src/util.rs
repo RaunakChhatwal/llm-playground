@@ -22,7 +22,7 @@ pub struct Config {
     pub api_keys: Vec<APIKey>
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Exchange {
     pub user_message: String,
     pub assistant_message: String

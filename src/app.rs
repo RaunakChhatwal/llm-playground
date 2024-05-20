@@ -139,29 +139,31 @@ async fn build_token_stream(prompt: String, exchanges: Vec<Exchange>)
 
     let (mut sender, recv) = futures::channel::mpsc::unbounded();
 
-    spawn_local(async move { loop {
-        let token = invoke("fetch_tokens", JsValue::null()).await;
-        if token.is_null() {
-            return;
-        }
-
-        let Some(result_str) = token.as_string() else {
-            let _ = sender.send(Err("Error parsing response.".into()));
-            return;
-        };
-
-        match serde_json::from_str::<Result<String, String>>(&result_str) {
-            Ok(token_result) => {
-                if let Err(_) = sender.send(token_result).await {
-                    return;
-                }
-            },
-            Err(error) => {
-                let _ = sender.send(Err(error.to_string())).await;
+    spawn_local(async move {
+        loop {
+            let token = invoke("fetch_tokens", JsValue::null()).await;
+            if token.is_null() {
                 return;
             }
-        };
-    }});
+
+            let Some(result_str) = token.as_string() else {
+                let _ = sender.send(Err("Error parsing response.".into()));
+                return;
+            };
+
+            match serde_json::from_str::<Result<String, String>>(&result_str) {
+                Ok(token_result) => {
+                    if let Err(_) = sender.send(token_result).await {
+                        return;
+                    }
+                },
+                Err(error) => {
+                    let _ = sender.send(Err(error.to_string())).await;
+                    return;
+                }
+            };
+        }
+    });
 
     return Ok(recv);
 }
@@ -178,6 +180,7 @@ pub fn App() -> impl IntoView {
     let (error, set_error) = create_signal("".to_string());
     let counter = create_rw_signal(0);
     let (exchanges, set_exchanges) = create_signal(Vec::<(usize, RwSignal<Exchange>)>::new());
+    let (new_exchange, set_new_exchange) = create_signal(Exchange::default());
     let (prompt, set_prompt) = create_signal("".to_string());
     let (streaming, set_streaming) = create_signal(false);
 
@@ -193,13 +196,10 @@ pub fn App() -> impl IntoView {
                 exchange())
             .collect::<Vec<Exchange>>();
 
-        let new_exchange = create_rw_signal(Exchange {
+        set_new_exchange(Exchange {
             user_message: prompt.clone(),
             assistant_message: "".to_string()
         });
-        set_exchanges.update(|exchanges|
-            exchanges.push((counter.get_untracked(), new_exchange)));
-        counter.update(|counter| *counter += 1);
 
         spawn_local(async move {
             let mut token_stream = match build_token_stream(prompt.clone(), exchanges).await {
@@ -212,8 +212,8 @@ pub fn App() -> impl IntoView {
 
             while let Some(token) = token_stream.next().await {
                 match token {
-                    Ok(token) => new_exchange.update(|exchange|
-                        exchange.assistant_message.push_str(&token)),
+                    Ok(token) => set_new_exchange.update(|exchange| exchange.assistant_message
+                        .push_str(&token)),
                     Err(error) => {
                         set_error(error.to_string());
                         break;
@@ -221,11 +221,13 @@ pub fn App() -> impl IntoView {
                 }
             }
 
-            if new_exchange.get_untracked().assistant_message.is_empty() {
-                new_exchange.dispose();
-                set_exchanges.update(|exchanges| {
-                    let _ = exchanges.pop();
-                });
+            let new_exchange = new_exchange.get_untracked();
+            if !new_exchange.assistant_message.is_empty() {     // whether canceled before response
+                set_exchanges.update(|exchanges|
+                    exchanges.push((counter.get_untracked(), create_rw_signal(new_exchange))));
+                counter.update(|counter| *counter += 1);
+                set_new_exchange(Exchange::default());
+            } else {
                 set_prompt(prompt);
             }
 
@@ -241,7 +243,7 @@ pub fn App() -> impl IntoView {
             >{error}</p>
             <div
                 class="mb-4 overflow-y-auto"
-                style:display=move || exchanges().is_empty().then(|| "None")
+                style:display=move || (exchanges().is_empty() && !streaming()).then(|| "None")
             >
                 <div class="flex flex-col">
                     <For
@@ -252,6 +254,14 @@ pub fn App() -> impl IntoView {
                         }
                     />
                 </div>
+                <p
+                    class="px-2 py-1 bg-[#222222] text-[0.9em]"
+                    style:margin-top=move || (!exchanges().is_empty()).then(|| "12px")
+                    style:display=move || (!streaming()).then(|| "None")
+                >{move || new_exchange().user_message}</p>
+                <p class="mt-[12px] px-2 py-1 min-h-6 bg-[#222222] text-[0.9em]"
+                    style:display=move || (!streaming()).then(|| "None")
+                >{move || new_exchange().assistant_message}</p>        
             </div>
             <div class=move || format!("flex-none {} max-h-[50vh] overflow-y-auto",
                 (exchanges().is_empty() && !streaming()).then(|| "mb-auto").unwrap_or("mt-auto mb-4"))>
