@@ -5,31 +5,13 @@ use leptos::*;
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::to_value;
 use wasm_bindgen::prelude::*;
+use crate::common::{Button, Menu};
 use crate::util::{Config, Exchange};
 
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "tauri"])]
     async fn invoke(cmd: &str, args: JsValue) -> JsValue;
-}
-
-#[component]
-fn Button(
-    class: &'static str,
-    label: &'static str,
-    to_hide: Signal<bool>,
-    on_click: Box<dyn Fn()>)
--> impl IntoView {
-    let class = format!("{class}
-        px-[6px] py-[2px] border-4 border-[#2A2A2A] bg-[#222222] hover:bg-[#2A2A2A] text-[#AAAABB]");
-
-    view! {
-        <button
-            class={class}
-            on:click=move |_| on_click()
-            style:display=move || to_hide().then(|| "None")
-        >{label}</button>
-    }
 }
 
 #[component]
@@ -121,8 +103,10 @@ fn ExchangeComponent(
                 class={"".into()}
                 placeholder={None}
                 content=user_message set_content=set_user_message />
-            <MessageBox id={format!("message-box-{}", 2*id + 1)} rows=1 placeholder={None}
-                class={"mt-[12px]".into()} content=assistant_message set_content=set_assistant_message />
+            <MessageBox id={format!("message-box-{}", 2*id + 1)}
+                rows=1 placeholder={None}
+                class={"mt-[12px]".into()} content=assistant_message
+                set_content=set_assistant_message />
         </div>
     }
 }
@@ -192,7 +176,7 @@ fn fn_mut_to_fn(f: Mutex::<Box<dyn FnMut()>>) -> Box<dyn Fn()> {
 }
 
 #[component]
-pub fn App() -> impl IntoView {
+pub fn Chat(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoView {
     let (error, set_error) = create_signal("".to_string());
     let counter = create_rw_signal(0);
     let (exchanges, set_exchanges) = create_signal(Vec::<(usize, RwSignal<Exchange>)>::new());
@@ -252,7 +236,10 @@ pub fn App() -> impl IntoView {
     }));
 
     view! {
-        <div class="flex flex-col h-full p-4 overflow-y-hidden text-[0.9rem]">
+        <div
+            class="flex flex-col h-full p-4 overflow-y-hidden text-[0.9rem]"
+            style:display=move || (menu.get() != Menu::Chat).then(|| "None")
+        >
             <p
                 class="mb-2 text-red-400 text-[0.9em]"
                 style:display=move || error().is_empty().then(|| "None")
@@ -302,7 +289,8 @@ pub fn App() -> impl IntoView {
                         to_hide=Signal::derive(move || !streaming()) on_click=Box::new(||
                             spawn_local(invoke("cancel", JsValue::null()).map(|_| ()))) />
                     <Button class="" label="Settings"
-                        to_hide=create_signal(false).0.into() on_click=Box::new(|| ())/>
+                        to_hide=create_signal(false).0.into()
+                        on_click=Box::new(move || set_menu(Menu::Settings))/>
                 </div>
             </div>
         </div>
