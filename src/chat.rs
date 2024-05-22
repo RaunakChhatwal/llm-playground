@@ -1,18 +1,11 @@
 use std::sync::Mutex;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use futures::{channel::mpsc::UnboundedReceiver, FutureExt, SinkExt, StreamExt};
+use gloo_utils::format::JsValueSerdeExt;
 use leptos::*;
-use serde::{Deserialize, Serialize};
-use serde_wasm_bindgen::to_value;
 use wasm_bindgen::prelude::*;
-use crate::common::{Button, Menu};
-use crate::util::{Config, Exchange};
-
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "tauri"])]
-    async fn invoke(cmd: &str, args: JsValue) -> JsValue;
-}
+use crate::common::{Button, ErrorMessage, invoke, load_config, Menu};
+use crate::util::Exchange;
 
 #[component]
 fn MessageBox(
@@ -111,33 +104,17 @@ fn ExchangeComponent(
     }
 }
 
-#[derive(Deserialize, Serialize)]
-struct FetchTokenArguments {
-    prompt: String,
-    config: Config,
-    exchanges: Vec<Exchange>
-}
-
 async fn build_token_stream(prompt: String, exchanges: Vec<Exchange>)
 -> Result<UnboundedReceiver<Result<String, String>>> {
-    let serialized_config = invoke("_load_config",
-        to_value(&serde_json::Value::Object(serde_json::Map::new()))
-        .expect("The empty object should successfully serialize"))
-        .await
-        .as_string()
-        .expect("load_config returns String");
-    let config = serde_json::from_str::<Result<Config, String>>(&serialized_config)
-        .context("Unable to parse config")?
-        .map_err(|error_message| anyhow!("{error_message}"))?;
-
-    let args = serde_wasm_bindgen::to_value(&FetchTokenArguments {
-        prompt,
-        config,
-        exchanges
-    }).map_err(|_| anyhow!("Error serializing fetch_token arguments"))?;
+    let args = JsValue::from_serde(&serde_json::json!({
+        "prompt": prompt,
+        "config": load_config().await?,
+        "exchanges": exchanges
+    })).map_err(|_| anyhow!("Error serializing fetch_token arguments"))?;
     let error = invoke("_build_token_stream", args).await;
     if !error.is_null() {
-        return Err(anyhow!("{}", error.as_string().expect("_build_token_stream returns Option<String>")));
+        return Err(anyhow!("{}",
+            error.as_string().expect("_build_token_stream returns Option<String>")));
     }
 
     let (mut sender, recv) = futures::channel::mpsc::unbounded();
@@ -179,6 +156,43 @@ fn fn_mut_to_fn(f: Mutex::<Box<dyn FnMut()>>) -> Box<dyn Fn()> {
 }
 
 #[component]
+fn Exchanges(
+    exchanges: ReadSignal<Vec<(usize, RwSignal<Exchange>)>>,
+    set_exchanges: WriteSignal<Vec<(usize, RwSignal<Exchange>)>>
+) -> impl IntoView {
+    view! {
+        <div class="flex flex-col">
+            <For
+                each=exchanges
+                key=|exchange| exchange.0
+                children=move |(id, exchange)| view! {
+                    <div style:margin-top=move || (id != exchanges()[0].0).then(|| "12px")>
+                        <ExchangeComponent id exchange set_exchanges />
+                    </div>
+                }
+            />
+        </div>
+    }
+}
+
+async fn collect_tokens(
+    mut token_stream: UnboundedReceiver<Result<String, String>>,
+    set_exchange: WriteSignal<Exchange>,
+    set_error: WriteSignal<String>
+) {
+    while let Some(token) = token_stream.next().await {
+        match token {
+            Ok(token) => set_exchange.update(|exchange|
+                exchange.assistant_message.push_str(&token)),
+            Err(error) => {
+                set_error(error.to_string());
+                break;
+            }
+        }
+    }
+}
+
+#[component]
 pub fn Chat(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoView {
     let (error, set_error) = create_signal("".to_string());
     let counter = create_rw_signal(0);
@@ -186,6 +200,11 @@ pub fn Chat(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoVie
     let (new_exchange, set_new_exchange) = create_signal(Exchange::default());
     let (prompt, set_prompt) = create_signal("".to_string());
     let (streaming, set_streaming) = create_signal(false);
+
+    let on_new = move || {
+        counter.set(0);
+        set_exchanges(Vec::new());
+    };
 
     // casting the closure to FnMut because on_submit isn't logically reentrant
     let on_submit = Mutex::<Box<dyn FnMut()>>::new(Box::new(move || {
@@ -206,17 +225,7 @@ pub fn Chat(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoVie
 
         spawn_local(async move {
             match build_token_stream(prompt.clone(), exchanges).await {
-                Ok(mut token_stream) =>
-                    while let Some(token) = token_stream.next().await {
-                        match token {
-                            Ok(token) => set_new_exchange.update(|exchange|
-                                exchange.assistant_message.push_str(&token)),
-                            Err(error) => {
-                                set_error(error.to_string());
-                                break;
-                            }
-                        }
-                    },
+                Ok(token_stream) => collect_tokens(token_stream, set_new_exchange, set_error).await,
                 Err(error) => set_error(error.to_string())
             }
 
@@ -239,25 +248,12 @@ pub fn Chat(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoVie
             class="flex flex-col h-full p-4 overflow-y-hidden text-[0.9rem]"
             style:display=move || (menu.get() != Menu::Chat).then(|| "None")
         >
-            <p
-                class="mb-2 text-red-400 text-[0.9em]"
-                style:display=move || error().is_empty().then(|| "None")
-            >{error}</p>
+            <ErrorMessage error />
             <div
                 class="mb-4 overflow-y-auto"
                 style:display=move || (exchanges().is_empty() && !streaming()).then(|| "None")
             >
-                <div class="flex flex-col">
-                    <For
-                        each=exchanges
-                        key=|exchange| exchange.0
-                        children=move |(id, exchange)| view! {
-                            <div style:margin-top=move || (id != exchanges()[0].0).then(|| "12px")>
-                                <ExchangeComponent id exchange set_exchanges />
-                            </div>
-                        }
-                    />
-                </div>
+                <Exchanges exchanges set_exchanges />
                 <p
                     class="px-2 py-1 bg-[#222222] text-[0.9em]"
                     style:margin-top=move || (!exchanges().is_empty()).then(|| "12px")
@@ -269,18 +265,15 @@ pub fn Chat(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoVie
             </div>
             <div class=move || format!("flex-none {} max-h-[50vh] overflow-y-auto",
                 (exchanges().is_empty() && !streaming()).then(|| "mb-auto").unwrap_or("mt-auto mb-4"))>
-                <div class="flex flex-col">
+                <div class="flex flex-col">     // scrolling breaks without this useless div
                     <MessageBox id={"prompt-box".into()} rows=2 class={"".into()}
                         placeholder={Some("Enter a prompt here.".into())}
                         content={prompt.into()} set_content={set_prompt.into()} />
                 </div>
             </div>
             <div class="flex-none flex">
-                <Button class="mr-4" label="New" to_hide=streaming.into()
-                    on_click=Box::new(move || {
-                        counter.set(0);
-                        set_exchanges(Vec::new());      // TODO: investigate whether exchanges' signals need to be disposed
-                    }) />
+                <Button class="mr-4" label="New"
+                    to_hide=streaming.into() on_click=Box::new(on_new) />
                 <Button class="" label="Submit"
                     to_hide=streaming.into() on_click=fn_mut_to_fn(on_submit) />
                 <div class="flex ml-auto">
