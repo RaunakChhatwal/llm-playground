@@ -1,12 +1,19 @@
+use strum_macros::{EnumString, VariantNames};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, strum_macros::Display, EnumString, Eq, Hash, PartialEq, Serialize, VariantNames)]
 pub enum Provider {
     OpenAI,
     Anthropic
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+impl Default for Provider {
+    fn default() -> Self {
+        Provider::OpenAI
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct APIKey {
     pub name: String,
     pub key: String,
