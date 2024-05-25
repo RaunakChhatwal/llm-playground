@@ -44,7 +44,7 @@ fn load_config() -> Result<Config, String> {
 }
 
 #[tauri::command]
-fn _load_config() -> String {
+fn _load_config() -> String {       // this has to wrap load_config becuase returning Err(_) panics
     return serde_json::to_string(&load_config())
         .expect("Result<Config, String> should always successfully serialize");
 }

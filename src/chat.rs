@@ -30,7 +30,7 @@ fn MessageBox(
         }
     };
 
-    // this is a hack because value=content entry in the view macro below does not work
+    // this is because value=content entry in the view macro below does not work
     create_effect({
         let id = id.clone();
             move |_| {
@@ -41,6 +41,7 @@ fn MessageBox(
 
             let content = content();
             if content_box.value() != content {
+                // this is different from setting the textarea's value html attribute, which will not work
                 content_box.set_value(&content);
                 content_box.set_attribute("style", "height: auto;")
                     .expect("The style attribute is available for every element.");
@@ -51,7 +52,7 @@ fn MessageBox(
         }
     });
 
-    let class = format!("{} flex-none w-full min-h-[2em] px-2 py-1
+    let class = format!("{} flex-none w-full min-h-[2em] px-2 pt-1 pb-2 border-2 border-[#303038]
         bg-[#222222] text-[0.9em] overflow-hidden resize-none", class);
     view! {
         <textarea id={id} rows={rows}
@@ -82,9 +83,7 @@ fn ExchangeComponent(
 
     let on_delete = move || {
         set_exchanges.update(|exchanges|
-            exchanges.retain(|(exchange_id, _)|
-                id != *exchange_id))
-    };
+            exchanges.retain(|(exchange_id, _)| id != *exchange_id))};
 
     view! {
         <div class="relative flex flex-col">
@@ -92,14 +91,34 @@ fn ExchangeComponent(
                 class="absolute top-[-10px] right-[10px] text-[1.5rem] text-[#AAAABB]"
                 on:click=move |_| on_delete()
             >"-"</button>
-            <MessageBox id={format!("message-box-{}", 2*id)} rows=1
-                class={"".into()}
-                placeholder={None}
+            <MessageBox id=format!("message-box-{}", 2*id) rows=1
+                class="".into()
+                placeholder=None
                 content=user_message set_content=set_user_message />
-            <MessageBox id={format!("message-box-{}", 2*id + 1)}
+            <MessageBox id=format!("message-box-{}", 2*id + 1)
                 rows=1 placeholder={None}
-                class={"mt-[12px]".into()} content=assistant_message
+                class="mt-[12px]".into() content=assistant_message
                 set_content=set_assistant_message />
+        </div>
+    }
+}
+
+#[component]
+fn Exchanges(
+    exchanges: ReadSignal<Vec<(usize, RwSignal<Exchange>)>>,
+    set_exchanges: WriteSignal<Vec<(usize, RwSignal<Exchange>)>>
+) -> impl IntoView {
+    view! {
+        <div class="flex flex-col">
+            <For
+                each=exchanges
+                key=|exchange| exchange.0
+                children=move |(id, exchange)| view! {
+                    <div style:margin-top=move || (id != exchanges()[0].0).then(|| "12px")>
+                        <ExchangeComponent id exchange set_exchanges />
+                    </div>
+                }
+            />
         </div>
     }
 }
@@ -153,26 +172,6 @@ fn fn_mut_to_fn(f: Mutex::<Box<dyn FnMut()>>) -> Box<dyn Fn()> {
         Ok(mut f) => f(),
         Err(_) => return
     });
-}
-
-#[component]
-fn Exchanges(
-    exchanges: ReadSignal<Vec<(usize, RwSignal<Exchange>)>>,
-    set_exchanges: WriteSignal<Vec<(usize, RwSignal<Exchange>)>>
-) -> impl IntoView {
-    view! {
-        <div class="flex flex-col">
-            <For
-                each=exchanges
-                key=|exchange| exchange.0
-                children=move |(id, exchange)| view! {
-                    <div style:margin-top=move || (id != exchanges()[0].0).then(|| "12px")>
-                        <ExchangeComponent id exchange set_exchanges />
-                    </div>
-                }
-            />
-        </div>
-    }
 }
 
 async fn collect_tokens(
@@ -255,20 +254,20 @@ pub fn Chat(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoVie
             >
                 <Exchanges exchanges set_exchanges />
                 <p
-                    class="px-2 py-1 bg-[#222222] text-[0.9em]"
+                    class="px-2 py-1 min-h-6 bg-[#222222] border-2 border-[#303038] text-[0.9em]"
                     style:margin-top=move || (!exchanges().is_empty()).then(|| "12px")
                     style:display=move || (!streaming()).then(|| "None")
                 >{move || new_exchange().user_message}</p>
-                <p class="mt-[12px] px-2 py-1 min-h-6 bg-[#222222] text-[0.9em]"
+                <p class="mt-[12px] px-2 py-1 min-h-6 bg-[#222222] border-2 border-[#303038] text-[0.9em]"
                     style:display=move || (!streaming()).then(|| "None")
                 >{move || new_exchange().assistant_message}</p>        
             </div>
             <div class=move || format!("flex-none {} max-h-[50vh] overflow-y-auto",
                 (exchanges().is_empty() && !streaming()).then(|| "mb-auto").unwrap_or("mt-auto mb-4"))>
                 <div class="flex flex-col">     // scrolling breaks without this useless div
-                    <MessageBox id={"prompt-box".into()} rows=2 class={"".into()}
-                        placeholder={Some("Enter a prompt here.".into())}
-                        content={prompt.into()} set_content={set_prompt.into()} />
+                    <MessageBox id="prompt-box".into() rows=2 class={"".into()}
+                        placeholder=Some("Enter a prompt here.".into())
+                        content=prompt.into() set_content=set_prompt.into() />
                 </div>
             </div>
             <div class="flex-none flex">
@@ -282,7 +281,7 @@ pub fn Chat(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoVie
                             spawn_local(invoke("cancel", JsValue::null()).map(|_| ()))) />
                     <Button class="" label="Settings"
                         to_hide=create_signal(false).0.into()
-                        on_click=Box::new(move || set_menu(Menu::Settings))/>
+                        on_click=Box::new(move || set_menu(Menu::Settings)) />
                 </div>
             </div>
         </div>
