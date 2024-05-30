@@ -38,13 +38,14 @@
         # our specific toolchain there.
         craneLib = (crane.mkLib pkgs).overrideToolchain rustWithWasmTarget;
 
-        buildInputs = with pkgs; [
+        buildInputs = with pkgs; ([
           openssl
           zlib
           at-spi2-atk
+        ] ++ (if stdenv.isLinux then [
           webkitgtk
           gtk3
-        ];
+        ] else []));
 
         llm-playground = craneLib.mkCargoDerivation (with pkgs; rec {
           src = lib.cleanSource ./.;
