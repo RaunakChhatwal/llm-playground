@@ -31,7 +31,7 @@ fn TemperatureSlider(
             let temperature = config.temperature.to_string();
             if input.value() != temperature {
                 // this is different from setting the input's value html attribute, which will not work
-                input.set_value(&temperature.to_string());
+                input.set_value(&temperature);
             }
         }
     });
@@ -216,7 +216,7 @@ fn KeyList(config: RwSignal<Option<Config>>, set_error: WriteSignal<String>) -> 
     );
     let (selected_key, set_selected_key) = create_slice(
         config,
-        |config| config.as_ref().and_then(|config| Some(config.api_keys[config.api_key?].name.clone())),
+        |config| config.as_ref().and_then(|config| Some(config.api_keys.get(config.api_key?)?.name.clone())),
         |config, selected_key: Option<String>| {
             config.as_mut().map(|config|
                 config.api_key = selected_key.and_then(|selected_key|
@@ -246,7 +246,6 @@ fn KeyList(config: RwSignal<Option<Config>>, set_error: WriteSignal<String>) -> 
 
     let on_add = move |_| {
         if let Some(mut new_api_key) = new_key.get_untracked() {
-            new_key.set(None);
             new_api_key.name = new_api_key.name.trim().into();
             if new_api_key.name.is_empty() {
                 set_error("API key name must be non-empty.".into());
@@ -257,6 +256,7 @@ fn KeyList(config: RwSignal<Option<Config>>, set_error: WriteSignal<String>) -> 
                 set_error("New key name must be unique.".into());
                 return;
             }
+            new_key.set(None);
             api_keys.push(new_api_key);
             set_api_keys(api_keys);
             set_error("".into());
