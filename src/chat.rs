@@ -33,11 +33,11 @@ fn MessageBox(
     // this is because value=content entry in the view macro below does not work
     create_effect({
         let id = id.clone();
-            move |_| {
+        move |_| {
             let content_box = document().get_element_by_id(&id)
                 .expect("This element exists.")
                 .dyn_into::<web_sys::HtmlTextAreaElement>()
-                .expect("content-box is a textarea element.");
+                .expect("This is a textarea element.");
 
             let content = content();
             if content_box.value() != content {
@@ -55,11 +55,8 @@ fn MessageBox(
     let class = format!("{} flex-none w-full min-h-[2em] px-2 pt-1 pb-2 border-2 border-[#303038]
         bg-[#222222] text-[0.9em] overflow-hidden resize-none", class);
     view! {
-        <textarea id={id} rows={rows}
-            class={class}
-            type="text"
-            on:input=on_input
-            placeholder={placeholder}
+        <textarea
+            id=id rows=rows class=class type="text" placeholder=placeholder on:input=on_input
         ></textarea>
     }
 }
@@ -254,11 +251,11 @@ pub fn Chat(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoVie
             >
                 <Exchanges exchanges set_exchanges />
                 <p
-                    class="px-2 py-1 min-h-6 bg-[#222222] border-2 border-[#303038] text-[0.9em]"
+                    class="px-2 py-1 min-h-[2em] bg-[#222222] border-2 border-[#303038] text-[0.9em]"
                     style:margin-top=move || (!exchanges().is_empty()).then(|| "12px")
                     style:display=move || (!streaming()).then(|| "None")
                 >{move || new_exchange().user_message}</p>
-                <p class="mt-[12px] px-2 py-1 min-h-6 bg-[#222222] border-2 border-[#303038] text-[0.9em]"
+                <p class="mt-[12px] px-2 py-1 min-h-[2em] bg-[#222222] border-2 border-[#303038] text-[0.9em]"
                     style:display=move || (!streaming()).then(|| "None")
                 >{move || new_exchange().assistant_message}</p>        
             </div>
