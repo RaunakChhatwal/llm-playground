@@ -1,5 +1,5 @@
-/dist/
-/public/index.css
+/leptos/dist/
+/leptos/public/index.css
 /target/
 /.vscode
 /shell.nix

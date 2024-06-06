@@ -7,8 +7,8 @@ command_arguments = ["-c", "tailwindcss -i input.css -o public/index.css"]
 target = "./index.html"
 offline = true
 
-[watch]
-ignore = ["./src-tauri"]
+# [watch]
+# ignore = ["./src-tauri"]
 
 [serve]
 address = "127.0.0.1"
