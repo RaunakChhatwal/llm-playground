@@ -1,10 +1,10 @@
 use std::sync::Mutex;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use futures::{channel::mpsc::UnboundedReceiver, FutureExt, SinkExt, StreamExt};
 use gloo_utils::format::JsValueSerdeExt;
 use leptos::*;
 use wasm_bindgen::prelude::*;
-use crate::common::{Button, ErrorMessage, invoke, load_config, Menu};
+use crate::common::{invoke, load_config, Button, ErrorMessage, Menu};
 use crate::util::Exchange;
 
 #[component]
@@ -55,8 +55,8 @@ fn MessageBox(
     let class = format!("{} flex-none w-full min-h-[2em] px-2 pt-1 pb-2 border-2 border-[#303038]
         bg-[#222222] text-[0.9em] overflow-hidden resize-none", class);
     view! {
-        <textarea
-            id=id rows=rows class=class type="text" placeholder=placeholder on:input=on_input
+        <textarea id=id rows=rows class=class type="text"
+            placeholder=placeholder on:input=on_input
         ></textarea>
     }
 }
@@ -93,7 +93,7 @@ fn ExchangeComponent(
                 placeholder=None
                 content=user_message set_content=set_user_message />
             <MessageBox id=format!("message-box-{}", 2*id + 1)
-                rows=1 placeholder={None}
+                rows=1 placeholder=None
                 class="mt-[12px]".into() content=assistant_message
                 set_content=set_assistant_message />
         </div>
@@ -129,8 +129,7 @@ async fn build_token_stream(prompt: String, exchanges: Vec<Exchange>)
     })).map_err(|_| anyhow!("Error serializing fetch_token arguments"))?;
     let error = invoke("_build_token_stream", args).await;
     if !error.is_null() {
-        return Err(anyhow!("{}",
-            error.as_string().expect("_build_token_stream returns Option<String>")));
+        bail!("{}", error.as_string().unwrap_or("Request failed.".into()));
     }
 
     let (mut sender, recv) = futures::channel::mpsc::unbounded();
@@ -241,12 +240,13 @@ pub fn Chat(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoVie
 
     view! {
         <div
-            class="flex flex-col h-full p-4 overflow-y-hidden text-[0.9rem]"
+            class="flex flex-col h-full p-4 md:py-16 overflow-y-hidden"
             style:display=move || (menu.get() != Menu::Chat).then(|| "None")
         >
+            <h1 class="hidden md:block ml-12 mb-6 text-[2em] font-serif">"LLM Playground"</h1>
             <ErrorMessage error />
             <div
-                class="mb-4 overflow-y-auto"
+                class="mb-4 md:px-[25vw] overflow-y-auto"
                 style:display=move || (exchanges().is_empty() && !streaming()).then(|| "None")
             >
                 <Exchanges exchanges set_exchanges />
@@ -259,26 +259,27 @@ pub fn Chat(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoVie
                     style:display=move || (!streaming()).then(|| "None")
                 >{move || new_exchange().assistant_message}</p>        
             </div>
-            <div class=move || format!("flex-none {} max-h-[50vh] overflow-y-auto",
-                (exchanges().is_empty() && !streaming()).then(|| "mb-auto").unwrap_or("mt-auto mb-4"))>
+            <div class=move || format!("flex-none {} md:px-[25vw] max-h-[50vh] overflow-y-auto",
+                (exchanges().is_empty() && !streaming()).then(|| "mb-auto").unwrap_or("mt-auto mb-4 md:mb-8"))
+            >
                 <div class="flex flex-col">     // scrolling breaks without this useless div
-                    <MessageBox id="prompt-box".into() rows=2 class={"".into()}
+                    <MessageBox id="prompt-box".into() rows=2 class="".into()
                         placeholder=Some("Enter a prompt here.".into())
                         content=prompt.into() set_content=set_prompt.into() />
                 </div>
             </div>
-            <div class="flex-none flex">
-                <Button class="mr-4" label="New"
+            <div class="flex-none md:px-[20vw] flex md:mx-8">
+                <Button class="mr-4 md:mr-8" label="New"
                     to_hide=streaming.into() on_click=Box::new(on_new) />
                 <Button class="" label="Submit"
                     to_hide=streaming.into() on_click=fn_mut_to_fn(on_submit) />
                 <div class="flex ml-auto">
-                    <Button class="mr-4" label="Cancel"
+                    <Button class="mr-4 md:mr-8" label="Cancel"
                         to_hide=Signal::derive(move || !streaming()) on_click=Box::new(||
                             spawn_local(invoke("cancel", JsValue::null()).map(|_| ()))) />
-                    <Button class="" label="Settings"
+                    <Button class="" label="Menu"
                         to_hide=create_signal(false).0.into()
-                        on_click=Box::new(move || set_menu(Menu::Settings)) />
+                        on_click=Box::new(move || set_menu(Menu::Menu)) />
                 </div>
             </div>
         </div>

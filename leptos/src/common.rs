@@ -13,14 +13,15 @@ extern "C" {
 #[derive(Clone, Copy, PartialEq)]
 pub enum Menu {
     Chat,
+    Menu,
+    History,
     Settings
 }
 
 #[component]
 pub fn ErrorMessage(error: ReadSignal<String>) -> impl IntoView {
     view! {
-        <p
-            class="mb-2 text-red-400 text-[0.9em]"
+        <p class="mb-2 text-red-400 text-[0.9em]"
             style:display=move || error().is_empty().then(|| "None")
         >{error}</p>
     }

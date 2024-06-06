@@ -1,7 +1,8 @@
 use strum_macros::{EnumString, VariantNames};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Deserialize, strum_macros::Display, EnumString, Eq, Hash, PartialEq, Serialize, VariantNames)]
+#[derive(Clone, Copy, Debug, Deserialize, strum_macros::Display, EnumString,
+    Eq, Hash, PartialEq, Serialize, VariantNames)]
 pub enum Provider {
     OpenAI,
     Anthropic
@@ -32,7 +33,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            temperature: 0.8,
+            temperature: 1.0,
             max_tokens: 1024,
             model: "".into(),
             api_key: None,
