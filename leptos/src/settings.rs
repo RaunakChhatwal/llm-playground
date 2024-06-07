@@ -176,15 +176,13 @@ fn KeyInput(new_key: RwSignal<Option<APIKey>>, set_error: WriteSignal<String>) -
                 }) />
             <label>"Provider:"</label>
             <div class="grid grid-cols-[repeat(2,max-content)] items-center">
-                <For
-                    each=move || Provider::VARIANTS
+                <For each=move || Provider::VARIANTS
                     key=|&provider_name| provider_name
                     children=|&provider_name| view! {
                         <input type="radio" value=provider_name name="provider"
                             id=format!("provider-{provider_name}") />
                         <label class="ml-2">{provider_name}</label>
-                    }
-                />
+                    } />
             </div>
         </div>
     }
@@ -249,23 +247,20 @@ fn KeyList(config: RwSignal<Config>, set_error: WriteSignal<String>) -> impl Int
     view! {
         <div class="col-span-2 grid grid-cols-1 gap-4">
             <h2 class="text-[1.1em] underline">"API Keys"</h2>
-            <div
-                class="grid grid-cols-[repeat(3,max-content)] gap-2 items-center"
-                on:change=move |event| set_selected_key(Some(event_target_value(&event)))
-            >
-                <For
-                    each=api_keys
+            <div class="grid grid-cols-[repeat(3,max-content)] gap-2 items-center"
+                    on:change=move |event| set_selected_key(Some(event_target_value(&event)))>
+                <For each=api_keys
                     key=|api_key| api_key.name.clone()
                     children=move |api_key| view! {
                         <KeyEntry api_key selected_key on_remove=Box::new(on_remove) />
-                    }
-                />
+                    } />
             </div>
             <KeyInput new_key set_error />
             <div class="flex">
                 <button class=format!("mr-2 {}", button_classes)
                     style:display=move || new_key().is_none().then(|| "None")
-                    on:click=move |_| new_key.set(None)>"Cancel"</button>
+                    on:click=move |_| new_key.set(None)
+                >"Cancel"</button>
                 <button class=button_classes on:click=on_add>"Add"</button>
             </div>
         </div>
@@ -311,17 +306,15 @@ pub fn Settings(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl Int
 
     view! {
         <div class="relative flex flex-col items-center mx-auto md:w-[max-content] md:min-w-[40vw]
-                h-full p-4 md:p-16 overflow-y-hidden text-[0.95em]"
-            style:display=move || (menu.get() != Menu::Settings).then(|| "None")
-        >
+                    h-full p-4 md:p-[5vh] overflow-y-hidden text-[0.95em]"
+                style:display=move || (menu.get() != Menu::Settings).then(|| "None")>
             <Button class="mr-auto" label="Back"
                 to_hide=create_signal(false).0.into()
                 on_click=Box::new(move || set_menu(Menu::Menu)) />
             <h1 class="text-[1.25em]">"Settings"</h1>
             <div class="w-full mt-2"><ErrorMessage error /></div>
             <div class="grid grid-cols-[repeat(2,max-content)] gap-[6.5vh]
-                items-center my-auto overflow-y-auto"
-            >
+                    items-center my-auto overflow-y-auto">
                 <TemperatureSlider config set_error />
                 <MaxTokensSlider config set_error />
                 <ModelInput config />

@@ -107,15 +107,13 @@ fn Exchanges(
 ) -> impl IntoView {
     view! {
         <div class="flex flex-col">
-            <For
-                each=exchanges
+            <For each=exchanges
                 key=|exchange| exchange.0
                 children=move |(id, exchange)| view! {
                     <div style:margin-top=move || (id != exchanges()[0].0).then(|| "12px")>
                         <ExchangeComponent id exchange set_exchanges />
                     </div>
-                }
-            />
+                } />
         </div>
     }
 }
@@ -239,19 +237,15 @@ pub fn Chat(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoVie
     }));
 
     view! {
-        <div
-            class="flex flex-col h-full p-4 md:py-16 overflow-y-hidden"
-            style:display=move || (menu.get() != Menu::Chat).then(|| "None")
-        >
-            <h1 class="hidden md:block ml-12 mb-6 text-[2em] font-serif">"LLM Playground"</h1>
+        <div class="flex flex-col md:w-[80vw] md:mx-auto h-full p-4 md:py-[5vh] overflow-y-hidden"
+                style:display=move || (menu.get() != Menu::Chat).then(|| "None")>
+            // <h1 class="hidden md:block ml-12 mb-6 text-[2em] font-serif">"LLM Playground"</h1>
+            <h1 class="hidden md:block mb-6 text-[2em] font-serif">"LLM Playground"</h1>
             <ErrorMessage error />
-            <div
-                class="mb-4 md:px-[25vw] overflow-y-auto"
-                style:display=move || (exchanges().is_empty() && !streaming()).then(|| "None")
-            >
+            <div class="mb-4 md:mx-[15vw] overflow-y-auto"
+                    style:display=move || (exchanges().is_empty() && !streaming()).then(|| "None")>
                 <Exchanges exchanges set_exchanges />
-                <p
-                    class="px-2 py-1 min-h-[2em] bg-[#222222] border-2 border-[#303038] text-[0.9em]"
+                <p class="px-2 py-1 min-h-[2em] bg-[#222222] border-2 border-[#303038] text-[0.9em]"
                     style:margin-top=move || (!exchanges().is_empty()).then(|| "12px")
                     style:display=move || (!streaming()).then(|| "None")
                 >{move || new_exchange().user_message}</p>
@@ -259,16 +253,17 @@ pub fn Chat(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoVie
                     style:display=move || (!streaming()).then(|| "None")
                 >{move || new_exchange().assistant_message}</p>        
             </div>
-            <div class=move || format!("flex-none {} md:px-[25vw] max-h-[50vh] overflow-y-auto",
-                (exchanges().is_empty() && !streaming()).then(|| "mb-auto").unwrap_or("mt-auto mb-4 md:mb-8"))
-            >
+            <div class=move || format!("flex-none {} md:mx-[14.5vw] max-h-[50vh] overflow-y-auto",
+                    (exchanges().is_empty() && !streaming())
+                        .then(|| "mb-auto")
+                        .unwrap_or("mt-auto mb-4 md:mb-8"))>
                 <div class="flex flex-col">     // scrolling breaks without this useless div
                     <MessageBox id="prompt-box".into() rows=2 class="".into()
                         placeholder=Some("Enter a prompt here.".into())
                         content=prompt.into() set_content=set_prompt.into() />
                 </div>
             </div>
-            <div class="flex-none md:px-[20vw] flex md:mx-8">
+            <div class="flex-none md:mx-[10vw] flex md:mx-8">
                 <Button class="mr-4 md:mr-8" label="New"
                     to_hide=streaming.into() on_click=Box::new(on_new) />
                 <Button class="" label="Submit"

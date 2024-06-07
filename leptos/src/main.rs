@@ -15,9 +15,9 @@ pub fn Menu(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoVie
     let to_hide = create_signal(false).0.into();
     view! {
         <div class="relative flex flex-col h-full"
-            style:display=move || (menu.get() != Menu::Menu).then(|| "None")
-        >
-            <h1 class="absolute top-0 left-0 my-8 w-full text-center text-[1.25em]">"Menu"</h1>
+                style:display=move || (menu.get() != Menu::Menu).then(|| "None")>
+            <h1 class="absolute top-0 left-0 my-8 md:my-[5vh] w-full text-center text-[1.25em]"
+            >"Menu"</h1>
             <div class="grid grid-cols-[50vw] md:grid-cols-[25vw] gap-12 md:gap-16
                 justify-center items-center my-auto">
                 <Button class="md:py-[6px]" label="Chat" to_hide
