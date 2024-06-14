@@ -48,6 +48,9 @@
         ] else []));
 
         llm-playground = craneLib.mkCargoDerivation (with pkgs; rec {
+          pname = "llm-playground";
+          version = "0.1.0";
+
           src = lib.cleanSource ./.;
           strictDeps = false;
           buildPhaseCargoCommand = ''
