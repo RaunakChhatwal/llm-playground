@@ -1,10 +1,10 @@
 use std::str::FromStr;
+use common::{APIKey, Config, Provider};
 use leptos::*;
 use gloo_utils::format::JsValueSerdeExt;
 use strum::VariantNames;
 use wasm_bindgen::prelude::*;
-use crate::common::{invoke, load_config, Button, ErrorMessage, Menu};
-use crate::util::{APIKey, Config, Provider};
+use crate::util::{invoke, load_config, Button, ErrorMessage, Menu};
 
 #[component]
 fn TemperatureSlider(

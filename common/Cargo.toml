@@ -1,0 +1,9 @@
+[package]
+name = "common"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = "1.0.203"
+strum = "0.26.2"
+strum_macros = "0.26.4"

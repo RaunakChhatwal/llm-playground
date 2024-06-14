@@ -1,14 +1,13 @@
 use leptos::*;
 use crate::chat::Chat;
-use crate::common::{Button, Menu};
+use crate::util::{Button, Menu};
 use crate::history::History;
 use crate::settings::Settings;
 
 mod chat;
-mod common;
+mod util;
 mod history;
 mod settings;
-mod util;
 
 #[component]
 pub fn Menu(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoView {

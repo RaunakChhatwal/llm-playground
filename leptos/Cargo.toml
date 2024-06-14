@@ -20,6 +20,4 @@ tokio = { version = "1.37.0", features = ["rt", "macros"] }
 gloo-utils = { version = "0.2.0", features = ["serde"] }
 strum_macros = "0.26.2"
 strum = "0.26.2"
-
-# [workspace]
-# members = ["src-tauri"]
+common = { path = "../common" }

@@ -1,5 +1,5 @@
 use leptos::*;
-use crate::common::{Menu, Button};
+use crate::util::{Menu, Button};
 
 #[component]
 pub fn History(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoView {

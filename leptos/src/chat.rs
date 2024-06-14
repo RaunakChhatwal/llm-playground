@@ -1,11 +1,11 @@
 use std::sync::Mutex;
 use anyhow::{anyhow, bail, Result};
+use common::Exchange;
 use futures::{channel::mpsc::UnboundedReceiver, FutureExt, SinkExt, StreamExt};
 use gloo_utils::format::JsValueSerdeExt;
 use leptos::*;
 use wasm_bindgen::prelude::*;
-use crate::common::{invoke, load_config, Button, ErrorMessage, Menu};
-use crate::util::Exchange;
+use crate::util::{invoke, load_config, Button, ErrorMessage, Menu};
 
 #[component]
 fn MessageBox(

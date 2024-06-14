@@ -1,11 +1,11 @@
 use anyhow::{anyhow, Result};
+use common::{APIKey, Config, Exchange, Provider};
 use futures::{channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender}, SinkExt, StreamExt};
 use lazy_static::lazy_static;
 use reqwest::{header::{HeaderMap, HeaderValue, CONTENT_TYPE}, RequestBuilder};
 use reqwest_eventsource::{Event, EventSource};
 use serde_json::{json, Value};
 use tokio::sync::{Mutex, Notify};
-use crate::util::{APIKey, Config, Exchange, Provider};
 
 fn build_request(api_key: &APIKey) -> Result<RequestBuilder> {
     let mut headers = HeaderMap::new();

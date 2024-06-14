@@ -3,10 +3,9 @@
 
 use std::{fs, path::Path};
 use anyhow::{anyhow, Context, Result};
+use common::{Config, Exchange};
 use fetch_tokens::{build_token_stream, cancel, fetch_tokens};
-use crate::util::{Config, Exchange};
 
-mod util;
 mod fetch_tokens;
 
 fn config_path() -> Result<std::path::PathBuf> {

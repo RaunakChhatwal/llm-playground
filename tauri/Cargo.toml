@@ -24,6 +24,7 @@ tokio = { version = "1.37.0", features = ["rt", "macros"] }
 lazy_static = "1.4.0"
 strum_macros = "0.26.2"
 strum = "0.26.2"
+common = { path = "../common" }
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!

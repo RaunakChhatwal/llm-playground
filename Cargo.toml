@@ -4,4 +4,4 @@
 # edition = "2021"
 
 [workspace]
-members = ["leptos", "tauri"]
+members = [ "common","leptos", "tauri"]
