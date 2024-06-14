@@ -1,9 +1,10 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use common::{APIKey, Config, Exchange, Provider};
+// TODO: change to tokio mpsc
 use futures::{channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender}, SinkExt, StreamExt};
 use lazy_static::lazy_static;
 use reqwest::{header::{HeaderMap, HeaderValue, CONTENT_TYPE}, RequestBuilder};
-use reqwest_eventsource::{Event, EventSource};
+use reqwest_eventsource::EventSource;
 use serde_json::{json, Value};
 use tokio::sync::{Mutex, Notify};
 
@@ -37,7 +38,7 @@ fn build_request_body(
     prompt: &str,
     config: &Config,
     exchanges: Vec<Exchange>,
-) -> String {
+) -> serde_json::Value {
     return json!({
         "model": config.model,
         "max_tokens": config.max_tokens,
@@ -58,17 +59,17 @@ fn build_request_body(
                 "content": prompt
             })))
             .collect::<Vec<Value>>()
-    }).to_string();
+    });
 }
 
 fn interpret_message(
     message: eventsource_stream::Event,
     provider: Provider
-) -> Option<Result<String>> {   // None represents response end
+) -> Result<Option<String>, String> {   // Ok(None) represents response end
     match provider {
         Provider::OpenAI => {
             if message.data.trim() == "[DONE]" {
-                return None;
+                return Ok(None);
             }
 
             let token_result = serde_json::from_str::<Value>(&message.data)
@@ -82,13 +83,13 @@ fn interpret_message(
                         .as_str()
                         .map(|token| token.to_string())
                 })
-                .ok_or(anyhow!("Error parsing response."));
+                .ok_or("Error parsing response.".into());
 
-            return Some(token_result);
+            return token_result.map(|token| Some(token));
         },
         Provider::Anthropic => {
             if message.event != "content_block_delta" {
-                return Some(Ok("".to_string()));
+                return Ok(Some("".to_string()));
             }
 
             let token_result = serde_json::from_str::<Value>(&message.data)
@@ -97,17 +98,17 @@ fn interpret_message(
                     .as_str()
                     .map(|token| token.to_string())
                 )
-                .ok_or(anyhow!("Error parsing response."));
+                .ok_or("Error parsing response.".into());
 
-            return Some(token_result);
+            return token_result.map(|token| Some(token));
         }
     }
 }
 
 lazy_static! {
     pub static ref CHANNEL: (
-        UnboundedSender<Option<Result<String>>>,
-        Mutex<UnboundedReceiver<Option<Result<String>>>>
+        UnboundedSender<Result<Option<String>, String>>,
+        Mutex<UnboundedReceiver<Result<Option<String>, String>>>
     ) = {
         let (sender, recv) = unbounded();
         (sender, Mutex::new(recv))
@@ -126,32 +127,34 @@ lazy_static! {
 }
 
 async fn collect_tokens(
-    mut event_source: EventSource,
-    mut sender: UnboundedSender<Option<Result<String>>>,
+    mut event_source: reqwest_eventsource::EventSource,
+    mut sender: UnboundedSender<Result<Option<String>, String>>,
     provider: Provider
 ) {
+    use reqwest_eventsource::Event;
+
     loop {
         tokio::select! {
             _ = CANCEL_NOTIFY.notified() => {
-                let _ = sender.send(None).await;
+                let _ = sender.send(Ok(None)).await;
                 event_source.close();
                 break;
             }
             event = event_source.next() => {
                 let Some(event) = event else {
-                    let _ = sender.send(None).await;
+                    let _ = sender.send(Ok(None)).await;
                     event_source.close();
                     break;
                 };
 
                 let token = match event {
-                    Ok(Event::Open) => Some(Ok("".into())),
+                    Ok(Event::Open) => Ok(Some("".into())),
                     Ok(Event::Message(message)) =>
                         interpret_message(message, provider),
-                    Err(reqwest_eventsource::Error::StreamEnded) => None,
-                    Err(error) => Some(Err(error.into()))
+                    Err(reqwest_eventsource::Error::StreamEnded) => Ok(None),
+                    Err(error) => Err(error.to_string())
                 };
-                let whether_stop = token.is_none();
+                let whether_stop = token.as_ref().map(|token| token.is_none()).unwrap_or(false);
 
                 if let Err(_) = sender.send(token).await {
                     event_source.close();
@@ -167,20 +170,22 @@ async fn collect_tokens(
     }
 }
 
+#[tauri::command]
 pub async fn build_token_stream(
     prompt: &str,
-    config: &Config,
+    config: Config,
     exchanges: Vec<Exchange>
-) -> Result<()> {
+) -> Result<(), String> {
     clear_channel().await;
 
     let api_key = config.api_keys[config.api_key
-        .ok_or(anyhow!("No API Key selected."))?].clone();
+        .ok_or("No API Key selected.".to_string())?].clone();
 
-    let request_builder = build_request(&api_key)?
-        .body(build_request_body(prompt, config, exchanges));
+    let request_builder = build_request(&api_key)
+        .map_err(|error| error.to_string())?
+        .body(build_request_body(prompt, &config, exchanges).to_string());
 
-    let event_source = EventSource::new(request_builder)?;
+    let event_source = EventSource::new(request_builder).map_err(|error| error.to_string())?;
     let sender = CHANNEL.0.clone();
     tokio::spawn(collect_tokens(event_source, sender, api_key.provider));
 
@@ -188,12 +193,13 @@ pub async fn build_token_stream(
 }
 
 #[tauri::command]
-pub async fn fetch_tokens() -> Option<String> {
+pub async fn fetch_tokens() -> Result<Option<String>, String> {
     let mut recv = CHANNEL.1.lock().await;
-    let option_token = recv.next().await.expect("The channel is 'static");
-    return option_token.map(|token|
-        serde_json::to_string(&token.map_err(|error| error.to_string()))
-            .expect("Result<String, String> should always serialize."));
+    let Some(token) = recv.next().await else {
+        return std::future::pending().await;
+    };
+
+    return token;
 }
 
 #[tauri::command]

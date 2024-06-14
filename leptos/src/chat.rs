@@ -1,11 +1,12 @@
 use std::sync::Mutex;
-use anyhow::{anyhow, bail, Result};
+use anyhow::Result;
 use common::Exchange;
-use futures::{channel::mpsc::UnboundedReceiver, FutureExt, SinkExt, StreamExt};
-use gloo_utils::format::JsValueSerdeExt;
+use futures::FutureExt;
+use futures::{channel::mpsc::UnboundedReceiver, SinkExt, StreamExt};
 use leptos::*;
 use wasm_bindgen::prelude::*;
-use crate::util::{invoke, load_config, Button, ErrorMessage, Menu};
+use crate::commands::{cancel, fetch_tokens, load_config};
+use crate::util::{Button, ErrorMessage, Menu};
 
 #[component]
 fn MessageBox(
@@ -118,43 +119,21 @@ fn Exchanges(
     }
 }
 
-async fn build_token_stream(prompt: String, exchanges: Vec<Exchange>)
--> Result<UnboundedReceiver<Result<String, String>>> {
-    let args = JsValue::from_serde(&serde_json::json!({
-        "prompt": prompt,
-        "config": load_config().await?,
-        "exchanges": exchanges
-    })).map_err(|_| anyhow!("Error serializing fetch_token arguments"))?;
-    let error = invoke("_build_token_stream", args).await;
-    if !error.is_null() {
-        bail!("{}", error.as_string().unwrap_or("Request failed.".into()));
-    }
+async fn build_token_stream(prompt: &str, exchanges: Vec<Exchange>)
+-> Result<UnboundedReceiver<Result<String, String>>, String> {
+    crate::commands::build_token_stream(prompt, load_config().await?, exchanges).await?;
 
     let (mut sender, recv) = futures::channel::mpsc::unbounded();
 
     spawn_local(async move {
         loop {
-            let token = invoke("fetch_tokens", JsValue::null()).await;
-            if token.is_null() {
-                return;
-            }
-
-            let Some(result_str) = token.as_string() else {
-                let _ = sender.send(Err("Error parsing response.".into()));
-                return;
+            let token = match fetch_tokens().await {
+                Ok(Some(token)) => Ok(token),
+                Ok(None) => return,
+                Err(error_message) => Err(error_message)
             };
 
-            match serde_json::from_str::<Result<String, String>>(&result_str) {
-                Ok(token_result) => {
-                    if let Err(_) = sender.send(token_result).await {
-                        return;
-                    }
-                },
-                Err(error) => {
-                    let _ = sender.send(Err(error.to_string())).await;
-                    return;
-                }
-            };
+            let _ = sender.send(token).await;
         }
     });
 
@@ -217,7 +196,7 @@ pub fn Chat(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoVie
         });
 
         spawn_local(async move {
-            match build_token_stream(prompt.clone(), exchanges).await {
+            match build_token_stream(&prompt, exchanges).await {
                 Ok(token_stream) => collect_tokens(token_stream, set_new_exchange, set_error).await,
                 Err(error) => set_error(error.to_string())
             }
@@ -271,7 +250,7 @@ pub fn Chat(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoVie
                 <div class="flex ml-auto">
                     <Button class="mr-4 md:mr-8" label="Cancel"
                         to_hide=Signal::derive(move || !streaming()) on_click=Box::new(||
-                            spawn_local(invoke("cancel", JsValue::null()).map(|_| ()))) />
+                            spawn_local(cancel().map(|_| ()))) />
                     <Button class="" label="Menu"
                         to_hide=create_signal(false).0.into()
                         on_click=Box::new(move || set_menu(Menu::Menu)) />

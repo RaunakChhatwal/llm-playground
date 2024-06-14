@@ -1,10 +1,10 @@
 use std::str::FromStr;
 use common::{APIKey, Config, Provider};
 use leptos::*;
-use gloo_utils::format::JsValueSerdeExt;
 use strum::VariantNames;
 use wasm_bindgen::prelude::*;
-use crate::util::{invoke, load_config, Button, ErrorMessage, Menu};
+use crate::commands::{load_config, save_config};
+use crate::util::{Button, ErrorMessage, Menu};
 
 #[component]
 fn TemperatureSlider(
@@ -291,16 +291,11 @@ pub fn Settings(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl Int
 
     let on_apply = move || spawn_local(async move {
         let config = config.get_untracked();
-        let config_JsValue = JsValue::from_serde(&serde_json::json!({
-            "config": config
-        })).expect("Serializing Config should always succeed");
-        let error = invoke("save_config", config_JsValue).await;
-        if error.is_null() {
+        if let Err(error_message) = save_config(config.clone()).await {
+            set_error(error_message);
+        } else {
             set_saved_config(Some(config));
             set_error("".into());
-        } else {
-            let error_message = error.as_string().unwrap_or("Error parsing save_config error".into());
-            set_error(error_message);
         }
     });
 

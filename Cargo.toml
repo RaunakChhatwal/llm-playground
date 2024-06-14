@@ -1,7 +1,3 @@
-# [package]
-# name = "llm-playground"
-# version = "0.0.0"
-# edition = "2021"
-
 [workspace]
-members = [ "common","leptos", "tauri"]
+members = [ "common", "leptos", "leptos/macros", "tauri"]
+resolver = "2"

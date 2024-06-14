@@ -5,6 +5,7 @@ use crate::history::History;
 use crate::settings::Settings;
 
 mod chat;
+mod commands;
 mod util;
 mod history;
 mod settings;

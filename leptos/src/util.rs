@@ -1,14 +1,4 @@
-use anyhow::{anyhow, Context, Result};
-use common::Config;
 use leptos::*;
-use serde_wasm_bindgen::to_value;
-use wasm_bindgen::prelude::*;
-
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "tauri"])]
-    pub async fn invoke(cmd: &str, args: JsValue) -> JsValue;
-}
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Menu {
@@ -44,17 +34,4 @@ pub fn Button(
             style:display=move || to_hide().then(|| "None")
         >{label}</button>
     }
-}
-
-pub async fn load_config() -> Result<Config> {
-    let serialized_config = invoke("_load_config",
-        to_value(&serde_json::Value::Object(serde_json::Map::new()))
-        .expect("The empty object should successfully serialize"))
-        .await
-        .as_string()
-        .expect("load_config returns String");
-
-    return serde_json::from_str::<Result<Config, String>>(&serialized_config)
-        .context("Unable to parse config")?
-        .map_err(|error_message| anyhow!("{error_message}"));
 }

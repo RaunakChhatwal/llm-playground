@@ -21,3 +21,4 @@ gloo-utils = { version = "0.2.0", features = ["serde"] }
 strum_macros = "0.26.2"
 strum = "0.26.2"
 common = { path = "../common" }
+macros = { path = "./macros" }
