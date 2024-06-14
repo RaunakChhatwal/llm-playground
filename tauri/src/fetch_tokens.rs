@@ -1,12 +1,11 @@
 use anyhow::Result;
 use common::{APIKey, Config, Exchange, Provider};
-// TODO: change to tokio mpsc
-use futures::{channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender}, SinkExt, StreamExt};
+use futures::StreamExt;
 use lazy_static::lazy_static;
 use reqwest::{header::{HeaderMap, HeaderValue, CONTENT_TYPE}, RequestBuilder};
 use reqwest_eventsource::EventSource;
 use serde_json::{json, Value};
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::{mpsc::{UnboundedSender, UnboundedReceiver}, Mutex, Notify};
 
 fn build_request(api_key: &APIKey) -> Result<RequestBuilder> {
     let mut headers = HeaderMap::new();
@@ -110,14 +109,14 @@ lazy_static! {
         UnboundedSender<Result<Option<String>, String>>,
         Mutex<UnboundedReceiver<Result<Option<String>, String>>>
     ) = {
-        let (sender, recv) = unbounded();
+        let (sender, recv) = tokio::sync::mpsc::unbounded_channel();
         (sender, Mutex::new(recv))
     };
 }
 
 async fn clear_channel() {
     let mut recv = CHANNEL.1.lock().await;
-    while let Ok(Some(token)) = recv.try_next() {
+    while let Some(Ok(Some(token))) = recv.recv().await {
         drop(token);
     }
 }
@@ -128,7 +127,7 @@ lazy_static! {
 
 async fn collect_tokens(
     mut event_source: reqwest_eventsource::EventSource,
-    mut sender: UnboundedSender<Result<Option<String>, String>>,
+    sender: UnboundedSender<Result<Option<String>, String>>,
     provider: Provider
 ) {
     use reqwest_eventsource::Event;
@@ -136,13 +135,13 @@ async fn collect_tokens(
     loop {
         tokio::select! {
             _ = CANCEL_NOTIFY.notified() => {
-                let _ = sender.send(Ok(None)).await;
+                let _ = sender.send(Ok(None));
                 event_source.close();
                 break;
             }
             event = event_source.next() => {
                 let Some(event) = event else {
-                    let _ = sender.send(Ok(None)).await;
+                    let _ = sender.send(Ok(None));
                     event_source.close();
                     break;
                 };
@@ -156,7 +155,7 @@ async fn collect_tokens(
                 };
                 let whether_stop = token.as_ref().map(|token| token.is_none()).unwrap_or(false);
 
-                if let Err(_) = sender.send(token).await {
+                if let Err(_) = sender.send(token) {
                     event_source.close();
                     break;
                 }
@@ -185,7 +184,8 @@ pub async fn build_token_stream(
         .map_err(|error| error.to_string())?
         .body(build_request_body(prompt, &config, exchanges).to_string());
 
-    let event_source = EventSource::new(request_builder).map_err(|error| error.to_string())?;
+    let event_source = EventSource::new(request_builder)
+        .map_err(|error| error.to_string())?;
     let sender = CHANNEL.0.clone();
     tokio::spawn(collect_tokens(event_source, sender, api_key.provider));
 
@@ -195,11 +195,7 @@ pub async fn build_token_stream(
 #[tauri::command]
 pub async fn fetch_tokens() -> Result<Option<String>, String> {
     let mut recv = CHANNEL.1.lock().await;
-    let Some(token) = recv.next().await else {
-        return std::future::pending().await;
-    };
-
-    return token;
+    return recv.recv().await.unwrap_or(Ok(None));
 }
 
 #[tauri::command]
