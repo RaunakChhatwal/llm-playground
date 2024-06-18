@@ -34,12 +34,13 @@ pub fn Menu(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoVie
 #[component]
 fn App() -> impl IntoView {
     let (menu, set_menu) = create_signal(Menu::Chat);
+    let (config, set_config) = create_signal(common::Config::default());
 
     view! {
-        <Chat menu set_menu />
+        <Chat config menu set_menu />
         <Menu menu set_menu />
         <History menu set_menu />
-        <Settings menu set_menu />
+        <Settings active_config=config set_active_config=set_config menu set_menu />
     }
 }
 

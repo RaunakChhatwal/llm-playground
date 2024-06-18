@@ -33,7 +33,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            temperature: 1.0,
+            temperature: 0.8,
             max_tokens: 1024,
             model: "".into(),
             api_key: None,

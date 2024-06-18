@@ -3,7 +3,7 @@ use common::{APIKey, Config, Provider};
 use leptos::*;
 use strum::VariantNames;
 use wasm_bindgen::prelude::*;
-use crate::commands::{load_config, save_config};
+use crate::commands::{load_config, poll_config_change, save_config};
 use crate::util::{Button, ErrorMessage, Menu};
 
 #[component]
@@ -268,7 +268,12 @@ fn KeyList(config: RwSignal<Config>, set_error: WriteSignal<String>) -> impl Int
 }
 
 #[component]
-pub fn Settings(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoView {
+pub fn Settings(
+    active_config: ReadSignal<Config>,
+    set_active_config: WriteSignal<Config>,
+    menu: ReadSignal<Menu>,
+    set_menu: WriteSignal<Menu>
+) -> impl IntoView {
     let (error, set_error) = create_signal("".to_string());
     let config = create_rw_signal(Config::default());
     let (saved_config, set_saved_config) = create_signal(None);
@@ -277,20 +282,40 @@ pub fn Settings(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl Int
         match load_config().await {
             Ok(loaded_config) => {
                 config.set(loaded_config.clone());
+                set_active_config(loaded_config.clone());
                 set_saved_config(Some(loaded_config));
             },
             Err(error) => set_error(error.to_string())
         }
     });
 
-    let to_hide = Signal::derive(move || Some(config()) == saved_config());
+    spawn_local(async move {
+        loop {
+            // wait until the user/another window/this window changes the config
+            match poll_config_change().await {
+                Ok(config) => set_saved_config(Some(config)),
+                Err(error_message) => set_error(error_message)
+            }
+        }
+    });
 
-    let on_discard = move || if let Some(saved_config) = saved_config.get_untracked() {
-        config.set(saved_config);
+    let to_hide = Signal::derive(move || {
+        let config = config();
+        return config == active_config() && Some(config) == saved_config();
+    });
+
+    let on_discard = move || {
+        if let Some(saved_config) = saved_config.get_untracked() {
+            config.set(saved_config.clone());
+            set_active_config(saved_config);
+        } else {
+            set_error("Bad config.".into());
+        };
     };
 
     let on_apply = move || spawn_local(async move {
         let config = config.get_untracked();
+        set_active_config(config.clone());
         if let Err(error_message) = save_config(config.clone()).await {
             set_error(error_message);
         } else {

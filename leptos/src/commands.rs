@@ -1,10 +1,13 @@
 use common::{Config, Exchange};
 
 #[macros::command]
-pub fn save_config(config: Config) -> Result<(), String> {}
+pub async fn save_config(config: Config) -> Result<(), String> {}
 
 #[macros::command]
-pub fn load_config() -> Result<Config, String> {}
+pub async fn load_config() -> Result<Config, String> {}
+
+#[macros::command]
+pub async fn poll_config_change() -> Result<Config, String> {}
 
 #[macros::command]
 pub async fn build_token_stream(
@@ -17,4 +20,4 @@ pub async fn build_token_stream(
 pub async fn fetch_tokens() -> Result<Option<String>, String> {}
 
 #[macros::command]
-pub fn cancel() -> Result<(), String> {}
+pub async fn cancel() -> Result<(), String> {}

@@ -1,7 +1,6 @@
 use anyhow::Result;
 use common::{APIKey, Config, Exchange, Provider};
 use futures::StreamExt;
-use lazy_static::lazy_static;
 use reqwest::{header::{HeaderMap, HeaderValue, CONTENT_TYPE}, RequestBuilder};
 use reqwest_eventsource::EventSource;
 use serde_json::{json, Value};
@@ -104,7 +103,7 @@ fn interpret_message(
     }
 }
 
-lazy_static! {
+lazy_static::lazy_static! {
     pub static ref CHANNEL: (
         UnboundedSender<Result<Option<String>, String>>,
         Mutex<UnboundedReceiver<Result<Option<String>, String>>>
@@ -116,12 +115,12 @@ lazy_static! {
 
 async fn clear_channel() {
     let mut recv = CHANNEL.1.lock().await;
-    while let Some(Ok(Some(token))) = recv.recv().await {
+    while let Ok(Ok(Some(token))) = recv.try_recv() {
         drop(token);
     }
 }
 
-lazy_static! {
+lazy_static::lazy_static! {
     static ref CANCEL_NOTIFY: Notify = Notify::new();
 }
 
@@ -153,7 +152,10 @@ async fn collect_tokens(
                     Err(reqwest_eventsource::Error::StreamEnded) => Ok(None),
                     Err(error) => Err(error.to_string())
                 };
-                let whether_stop = token.as_ref().map(|token| token.is_none()).unwrap_or(false);
+                let whether_stop = token
+                    .as_ref()
+                    .map(|token| token.is_none())
+                    .unwrap_or(false);
 
                 if let Err(_) = sender.send(token) {
                     event_source.close();

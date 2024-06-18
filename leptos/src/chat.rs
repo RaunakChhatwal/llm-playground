@@ -1,11 +1,11 @@
 use std::sync::Mutex;
 use anyhow::Result;
-use common::Exchange;
+use common::{Config, Exchange};
 use futures::FutureExt;
 use futures::{channel::mpsc::UnboundedReceiver, SinkExt, StreamExt};
 use leptos::*;
 use wasm_bindgen::prelude::*;
-use crate::commands::{cancel, fetch_tokens, load_config};
+use crate::commands::{cancel, fetch_tokens};
 use crate::util::{Button, ErrorMessage, Menu};
 
 #[component]
@@ -119,9 +119,9 @@ fn Exchanges(
     }
 }
 
-async fn build_token_stream(prompt: &str, exchanges: Vec<Exchange>)
+async fn build_token_stream(prompt: &str, config: Config, exchanges: Vec<Exchange>)
 -> Result<UnboundedReceiver<Result<String, String>>, String> {
-    crate::commands::build_token_stream(prompt, load_config().await?, exchanges).await?;
+    crate::commands::build_token_stream(prompt, config, exchanges).await?;
 
     let (mut sender, recv) = futures::channel::mpsc::unbounded();
 
@@ -165,7 +165,11 @@ async fn collect_tokens(
 }
 
 #[component]
-pub fn Chat(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoView {
+pub fn Chat(
+    config: ReadSignal<Config>,
+    menu: ReadSignal<Menu>,
+    set_menu: WriteSignal<Menu>
+) -> impl IntoView {
     let (error, set_error) = create_signal("".to_string());
     let counter = create_rw_signal(0);
     let (exchanges, set_exchanges) = create_signal(Vec::<(usize, RwSignal<Exchange>)>::new());
@@ -196,7 +200,7 @@ pub fn Chat(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoVie
         });
 
         spawn_local(async move {
-            match build_token_stream(&prompt, exchanges).await {
+            match build_token_stream(&prompt, config.get_untracked(), exchanges).await {
                 Ok(token_stream) => collect_tokens(token_stream, set_new_exchange, set_error).await,
                 Err(error) => set_error(error.to_string())
             }
@@ -218,7 +222,6 @@ pub fn Chat(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoVie
     view! {
         <div class="flex flex-col md:w-[80vw] md:mx-auto h-full p-4 md:py-[5vh] overflow-y-hidden"
                 style:display=move || (menu.get() != Menu::Chat).then(|| "None")>
-            // <h1 class="hidden md:block ml-12 mb-6 text-[2em] font-serif">"LLM Playground"</h1>
             <h1 class="hidden md:block mb-6 text-[2em] font-serif">"LLM Playground"</h1>
             <ErrorMessage error />
             <div class="mb-4 md:mx-[15vw] overflow-y-auto"
