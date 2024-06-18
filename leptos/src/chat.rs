@@ -1,4 +1,3 @@
-use std::sync::Mutex;
 use anyhow::Result;
 use common::{Config, Exchange};
 use futures::FutureExt;
@@ -141,13 +140,6 @@ async fn build_token_stream(prompt: &str, config: Config, exchanges: Vec<Exchang
     return Ok(recv);
 }
 
-fn fn_mut_to_fn(f: Mutex::<Box<dyn FnMut()>>) -> Box<dyn Fn()> {
-    return Box::new(move || match f.try_lock() {
-        Ok(mut f) => f(),
-        Err(_) => return
-    });
-}
-
 async fn collect_tokens(
     mut token_stream: UnboundedReceiver<Result<String, String>>,
     set_exchange: WriteSignal<Exchange>,
@@ -183,8 +175,7 @@ pub fn Chat(
         set_exchanges(Vec::new());
     };
 
-    // casting the closure to FnMut because on_submit isn't logically reentrant
-    let on_submit = Mutex::<Box<dyn FnMut()>>::new(Box::new(move || {
+    let on_submit = move || {
         set_streaming(true);
         set_error("".to_string());
         let prompt = prompt();
@@ -218,7 +209,7 @@ pub fn Chat(
 
             set_streaming(false);
         });
-    }));
+    };
 
     view! {
         <div class="flex flex-col md:w-[80vw] md:mx-auto h-full p-4 md:py-[5vh] overflow-y-hidden"
@@ -250,7 +241,7 @@ pub fn Chat(
                 <Button class="mr-4 md:mr-8" label="New"
                     to_hide=streaming.into() on_click=Box::new(on_new) />
                 <Button class="" label="Submit"
-                    to_hide=streaming.into() on_click=fn_mut_to_fn(on_submit) />
+                    to_hide=streaming.into() on_click=Box::new(on_submit) />
                 <div class="flex ml-auto">
                     <Button class="mr-4 md:mr-8" label="Cancel"
                         to_hide=Signal::derive(move || !streaming()) on_click=Box::new(||
