@@ -127,13 +127,14 @@ async fn build_token_stream(prompt: &str, config: Config, exchanges: Vec<Exchang
 
     spawn_local(async move {
         loop {
-            let token = match fetch_tokens().await {
-                Ok(Some(token)) => Ok(token),
+            match fetch_tokens().await {
+                Ok(Some(token)) => drop(sender.send(Ok(token)).await),
                 Ok(None) => return,
-                Err(error_message) => Err(error_message)
+                Err(error_message) => {
+                    let _ = cancel();
+                    let _ = sender.send(Err(error_message)).await;
+                }
             };
-
-            let _ = sender.send(token).await;
         }
     });
 

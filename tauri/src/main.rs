@@ -52,9 +52,7 @@ fn save_config(config: Config) -> Result<(), String> {
     let serialized_config = serde_json::to_string(&config)
         .expect("Config should always successfully serialize");
     fs::write(config_path, &serialized_config)
-        .map_err(|error| error.to_string())?;
-
-    Ok(())
+        .map_err(|error| error.to_string())
 }
 
 lazy_static::lazy_static! {
