@@ -47,3 +47,10 @@ pub struct Exchange {
     pub user_message: String,
     pub assistant_message: String
 }
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct Conversation {
+    pub uuid: uuid::Uuid,
+    pub time: chrono::DateTime<chrono::Utc>,
+    pub title: String
+}

@@ -130,7 +130,7 @@ async fn build_token_stream(prompt: &str, config: Config, exchanges: Vec<Exchang
                 Ok(Some(token)) => drop(sender.send(Ok(token)).await),
                 Ok(None) => return,
                 Err(error_message) => {
-                    let _ = cancel();
+                    let _ = cancel().await;
                     let _ = sender.send(Err(error_message)).await;
                 }
             };
@@ -245,7 +245,7 @@ pub fn Chat(
                 <div class="flex ml-auto">
                     <Button class="mr-4 md:mr-8" label="Cancel"
                         to_hide=Signal::derive(move || !streaming()) on_click=Box::new(||
-                            spawn_local(cancel().map(|_| ()))) />
+                            spawn_local(cancel().map(drop))) />
                     <Button class="" label="Menu"
                         to_hide=create_signal(false).0.into()
                         on_click=Box::new(move || set_menu(Menu::Menu)) />

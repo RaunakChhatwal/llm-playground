@@ -27,6 +27,11 @@ strum = "0.26.2"
 common = { path = "../common" }
 notify = "6.1.1"
 serde-error = "0.1.2"
+sqlx = { version = "0.7.4", features = ["sqlite"] }
+sea-orm = "0.12.15"
+entity = { path = "./entity" }
+uuid = "1.8.0"
+chrono = "0.4.38"
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!
