@@ -56,7 +56,7 @@ async fn load_config() -> Result<Config, Error> {
 async fn save_config(config: Config) -> Result<(), Error> {
     let config_path = config_dir().await?.join("config.json");
     let serialized_config = serde_json::to_string(&config)
-        .expect("Config should always successfully serialize");
+        .map_err(|error| Error::new(&error))?;
     tokio::fs::write(config_path, &serialized_config).await
         .map_err(|error| Error::new(&error))
 }
@@ -144,7 +144,30 @@ async fn load_conversations() -> Result<Vec<Conversation>, Error> {
 
 #[tauri::command]
 async fn poll_conversations_change() -> Result<Vec<Conversation>, Error> {
-    todo!()
+    let poll_conversations_change = || async {
+        let recv = CONVERSATIONS_CHANNEL.1.lock().await;
+        loop {
+            let event = match recv.recv() {
+                Ok(Ok(event)) => event,
+                Ok(Err(error)) => return Err(Error::new(&error)),
+                Err(error) => return Err(Error::new(&error))
+            };
+            return match event.kind {
+                notify::EventKind::Create(_)
+                | notify::EventKind::Modify(_)
+                | notify::EventKind::Remove(_) => load_conversations().await,
+                // ignore miscellaneous events
+                _ => continue
+            };
+        }
+    };
+
+    loop {
+        // spawning because recv is sync
+        if let Ok(conversations_result) = tokio::spawn(poll_conversations_change()).await {
+            return conversations_result;
+        }
+    }
 }
 
 fn watch_file(sender: Sender<Result<notify::Event, notify::Error>>, file: &Path) -> Result<()> {
