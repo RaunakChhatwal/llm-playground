@@ -28,16 +28,16 @@ pub fn command(_attr: TokenStream, item: TokenStream) -> TokenStream {
             let argument = argument.ident;
             quote! {
                 arguments_map.insert(stringify!(#argument).to_string(), serde_json::to_value(#argument)
-                    .map_err(|error| format!("Error serializing arguments to {function_name}: {error}"))?);
+                    .context(format!("Error serializing arguments to {function_name}"))?);
             }
         })
         .collect::<Vec<_>>();
 
     return TokenStream::from(quote! {
         #visibility async fn #function_name(#arguments) -> #return_type {
-            use wasm_bindgen::JsValue;
+            use anyhow::{anyhow, Context};
             use gloo_utils::format::JsValueSerdeExt;
-            use wasm_bindgen::prelude::*;
+            use wasm_bindgen::{JsValue, prelude::*};
 
             #[wasm_bindgen]
             extern "C" {
@@ -50,11 +50,14 @@ pub fn command(_attr: TokenStream, item: TokenStream) -> TokenStream {
             let mut arguments_map = serde_json::Map::new();
             #(#insert_statements)*
             let arguments_JsValue = JsValue::from_serde(&serde_json::Value::Object(arguments_map))
-                .map_err(|error| format!("Error serializing arguments to {function_name}: {error}"))?;
+                .context(format!("Error serializing arguments to {function_name}"))?;
 
             match invoke(function_name, arguments_JsValue).await {
-                Ok(result) => Ok(JsValue::into_serde(&result).map_err(|error| error.to_string())?),
-                Err(error) => Err(error.as_string().unwrap_or(format!("Error invoking {function_name}.")))
+                Ok(result) => Ok(JsValue::into_serde(&result)?),
+                Err(error) => Err(JsValue::into_serde::<serde_error::Error>(&error)
+                    .ok()
+                    .map(anyhow::Error::from)
+                    .unwrap_or(anyhow!("Error invoking {function_name}")))
             }
         }
     });

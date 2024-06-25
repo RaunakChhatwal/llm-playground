@@ -119,7 +119,7 @@ fn Exchanges(
 }
 
 async fn build_token_stream(prompt: &str, config: Config, exchanges: Vec<Exchange>)
--> Result<UnboundedReceiver<Result<String, String>>, String> {
+-> Result<UnboundedReceiver<Result<String>>> {
     crate::commands::build_token_stream(prompt, config, exchanges).await?;
 
     let (mut sender, recv) = futures::channel::mpsc::unbounded();
@@ -141,7 +141,7 @@ async fn build_token_stream(prompt: &str, config: Config, exchanges: Vec<Exchang
 }
 
 async fn collect_tokens(
-    mut token_stream: UnboundedReceiver<Result<String, String>>,
+    mut token_stream: UnboundedReceiver<Result<String>>,
     set_exchange: WriteSignal<Exchange>,
     set_error: WriteSignal<String>
 ) {

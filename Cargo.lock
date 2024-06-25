@@ -608,8 +608,10 @@ dependencies = [
 name = "common"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "chrono",
  "serde",
+ "serde-error",
  "strum 0.26.2",
  "strum_macros",
  "uuid",
@@ -2477,6 +2479,7 @@ dependencies = [
  "leptos",
  "macros",
  "serde",
+ "serde-error",
  "serde-wasm-bindgen",
  "serde_json",
  "strum 0.26.2",

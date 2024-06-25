@@ -3,7 +3,7 @@
 
 use std::{path::Path, sync::mpsc::{Receiver, Sender}};
 use anyhow::{anyhow, Context, Result};
-use common::{Config, Conversation};
+use common::{Config, Conversation, to_serde_err};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use sea_orm::{Database, EntityTrait};
 use serde_error::Error;
@@ -11,10 +11,6 @@ use tokio::sync::Mutex;
 use fetch_tokens::{build_token_stream, cancel, fetch_tokens};
 
 mod fetch_tokens;
-
-fn to_serde_err(error: anyhow::Error) -> Error {
-    Error::new(&*error)
-}
 
 async fn config_dir() -> Result<std::path::PathBuf, Error> {
     let config_dir = dirs::config_dir()

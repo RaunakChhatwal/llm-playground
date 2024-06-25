@@ -294,7 +294,7 @@ pub fn Settings(
             // wait until the user/another window/this window changes the config
             match poll_config_change().await {
                 Ok(config) => set_saved_config(Some(config)),
-                Err(error_message) => set_error(error_message)
+                Err(error_message) => set_error(error_message.to_string())
             }
         }
     });
@@ -317,7 +317,7 @@ pub fn Settings(
         let config = config.get_untracked();
         set_active_config(config.clone());
         if let Err(error_message) = save_config(config.clone()).await {
-            set_error(error_message);
+            set_error(error_message.to_string());
         } else {
             set_saved_config(Some(config));
             set_error("".into());

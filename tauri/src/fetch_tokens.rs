@@ -1,8 +1,9 @@
-use anyhow::Result;
-use common::{APIKey, Config, Exchange, Provider};
+use anyhow::{anyhow, Result};
+use common::{APIKey, Config, Exchange, Provider, to_serde_err};
 use futures::StreamExt;
 use reqwest::{header::{HeaderMap, HeaderValue, CONTENT_TYPE}, RequestBuilder};
 use reqwest_eventsource::EventSource;
+use serde_error::Error;
 use serde_json::{json, Value};
 use tokio::sync::{mpsc::{UnboundedSender, UnboundedReceiver}, Mutex, Notify};
 
@@ -63,7 +64,7 @@ fn build_request_body(
 fn interpret_message(
     message: eventsource_stream::Event,
     provider: Provider
-) -> Result<Option<String>, String> {   // Ok(None) represents response end
+) -> Result<Option<String>> {   // Ok(None) represents response end
     match provider {
         Provider::OpenAI => {
             if message.data.trim() == "[DONE]" {
@@ -81,7 +82,7 @@ fn interpret_message(
                         .as_str()
                         .map(|token| token.to_string())
                 })
-                .ok_or("Error parsing response.".into());
+                .ok_or(anyhow!("Error parsing response."));
 
             return token_result.map(|token| Some(token));
         },
@@ -96,7 +97,7 @@ fn interpret_message(
                     .as_str()
                     .map(|token| token.to_string())
                 )
-                .ok_or("Error parsing response.".into());
+                .ok_or(anyhow!("Error parsing response."));
 
             return token_result.map(|token| Some(token));
         }
@@ -105,8 +106,8 @@ fn interpret_message(
 
 lazy_static::lazy_static! {
     pub static ref CHANNEL: (
-        UnboundedSender<Result<Option<String>, String>>,
-        Mutex<UnboundedReceiver<Result<Option<String>, String>>>
+        UnboundedSender<Result<Option<String>>>,
+        Mutex<UnboundedReceiver<Result<Option<String>>>>
     ) = {
         let (sender, recv) = tokio::sync::mpsc::unbounded_channel();
         (sender, Mutex::new(recv))
@@ -126,7 +127,7 @@ lazy_static::lazy_static! {
 
 async fn collect_tokens(
     mut event_source: reqwest_eventsource::EventSource,
-    sender: UnboundedSender<Result<Option<String>, String>>,
+    sender: UnboundedSender<Result<Option<String>>>,
     provider: Provider
 ) {
     use reqwest_eventsource::Event;
@@ -150,11 +151,11 @@ async fn collect_tokens(
                     Ok(Event::Message(message)) =>
                         interpret_message(message, provider),
                     Err(reqwest_eventsource::Error::StreamEnded) => Ok(None),
-                    Err(error) => Err(error.to_string())
+                    Err(error) => Err(error.into())
                 };
                 let whether_stop = token
                     .as_ref()
-                    .map(|token| token.is_none())
+                    .map(Option::is_none)
                     .unwrap_or(false);
 
                 if let Err(_) = sender.send(token) {
@@ -176,18 +177,18 @@ pub async fn build_token_stream(
     prompt: &str,
     config: Config,
     exchanges: Vec<Exchange>
-) -> Result<(), String> {
+) -> Result<(), Error> {
     clear_channel().await;
 
     let api_key = config.api_keys[config.api_key
-        .ok_or("No API Key selected.".to_string())?].clone();
+        .ok_or(to_serde_err(anyhow!("No API Key selected.")))?].clone();
 
     let request_builder = build_request(&api_key)
-        .map_err(|error| error.to_string())?
+        .map_err(to_serde_err)?
         .body(build_request_body(prompt, &config, exchanges).to_string());
 
     let event_source = EventSource::new(request_builder)
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| Error::new(&error))?;
     let sender = CHANNEL.0.clone();
     tokio::spawn(collect_tokens(event_source, sender, api_key.provider));
 
@@ -195,9 +196,9 @@ pub async fn build_token_stream(
 }
 
 #[tauri::command]
-pub async fn fetch_tokens() -> Result<Option<String>, String> {
+pub async fn fetch_tokens() -> Result<Option<String>, Error> {
     let mut recv = CHANNEL.1.lock().await;
-    return recv.recv().await.unwrap_or(Ok(None));
+    return recv.recv().await.unwrap_or(Ok(None)).map_err(to_serde_err);
 }
 
 #[tauri::command]

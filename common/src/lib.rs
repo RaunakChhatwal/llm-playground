@@ -1,6 +1,10 @@
 use strum_macros::{EnumString, VariantNames};
 use serde::{Deserialize, Serialize};
 
+pub fn to_serde_err(error: anyhow::Error) -> serde_error::Error {
+    serde_error::Error::new(&*error)
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, strum_macros::Display, EnumString,
     Eq, Hash, PartialEq, Serialize, VariantNames)]
 pub enum Provider {
