@@ -325,7 +325,7 @@ pub fn Settings(
     });
 
     view! {
-        <div class="relative flex flex-col items-center mx-auto md:w-[max-content] md:min-w-[40vw]
+        <div class="relative flex flex-col items-center mx-auto md:w-[max-content] md:min-w-[60vw]
                     h-full p-4 md:p-[5vh] overflow-y-hidden text-[0.95em]"
                 style:display=move || (menu.get() != Menu::Settings).then(|| "None")>
             <Button class="mr-auto" label="Back"
@@ -340,7 +340,7 @@ pub fn Settings(
                 <ModelInput config />
                 <KeyList config set_error />
             </div>
-            <div class="flex justify-end md:mb-16 w-full">
+            <div class="flex justify-end mb-[4vh] md:mb-[8vh] w-full">
                 <Button class="mr-4" label="Discard" to_hide on_click=Box::new(on_discard) />
                 <Button class="" label="Apply" to_hide on_click=Box::new(on_apply) />
             </div>
