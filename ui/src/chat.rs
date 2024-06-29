@@ -1,10 +1,10 @@
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
 use common::{Config, Exchange};
-use futures::FutureExt;
-use futures::{channel::mpsc::UnboundedReceiver, SinkExt, StreamExt};
+use gloo_utils::format::JsValueSerdeExt;
 use leptos::*;
-use wasm_bindgen::prelude::*;
-use crate::commands::{add_conversation, cancel, fetch_tokens};
+use tokio::sync::mpsc::UnboundedReceiver;
+use wasm_bindgen::{JsValue, prelude::*};
+use crate::commands::add_conversation;
 use crate::util::{Button, ErrorMessage, Menu};
 
 #[component]
@@ -118,23 +118,63 @@ fn Exchanges(
     }
 }
 
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(catch, js_namespace = ["window", "__TAURI__", "event"])]
+    async fn listen(
+        cmd: &str,
+        cb: &Closure<dyn Fn(JsValue)>
+    ) -> Result<JsValue, JsValue>;
+}
+
+fn deserialize_event(event: JsValue) -> Result<Option<String>> {
+    let parsed_event = JsValue::into_serde::<serde_json::Map<String, serde_json::Value>>(&event)?;
+    let payload = parsed_event.get("payload").ok_or(anyhow!("Unable to deserialize token."))?;
+
+    if let Some(token) = payload.get("Ok") {
+        if token.is_null() {
+            return Ok(None);    // signals end of response
+        }
+
+        if let Some(token) = token.as_str() {
+            return Ok(Some(token.into()));
+        }
+    } else if let Some(error) = payload.get("Err") {
+        if let Ok(error) = serde_json::from_value::<serde_error::Error>(error.clone()) {
+            return Err(error.into());
+        }
+    }
+
+    bail!("Unable to deserialize token.");
+}
+
 async fn build_token_stream(prompt: &str, config: Config, exchanges: Vec<Exchange>)
 -> Result<UnboundedReceiver<Result<String>>> {
     crate::commands::build_token_stream(prompt, config, exchanges).await?;
 
-    let (mut sender, recv) = futures::channel::mpsc::unbounded();
+    let (sender, recv) = tokio::sync::mpsc::unbounded_channel();
+    let close = std::sync::Arc::new(tokio::sync::Notify::new());
+
+    let on_token = {
+        let close = close.clone();
+        Closure::new(move |event: JsValue| {
+            match deserialize_event(event) {
+                Ok(Some(token)) => drop(sender.send(Ok(token))),
+                Ok(None) => close.notify_one(),
+                Err(error) => drop(sender.send(Err(error))),
+            }
+        })
+    };
+
+    let unlisten = listen("token", &on_token).await
+        .map_err(|_| anyhow!("Error listening for tokens"))?
+        .dyn_into::<js_sys::Function>()
+        .map_err(|_| anyhow!("Error listening for tokens"))?;
 
     spawn_local(async move {
-        loop {
-            match fetch_tokens().await {
-                Ok(Some(token)) => drop(sender.send(Ok(token)).await),
-                Ok(None) => return,
-                Err(error_message) => {
-                    let _ = cancel().await;
-                    let _ = sender.send(Err(error_message)).await;
-                }
-            };
-        }
+        close.notified().await;
+        let _ = unlisten.call0(&JsValue::null());
+        drop(on_token);     // in order to keep on_token alive until closed
     });
 
     return Ok(recv);
@@ -145,7 +185,7 @@ async fn collect_tokens(
     set_exchange: WriteSignal<Exchange>,
     set_error: WriteSignal<String>
 ) {
-    while let Some(token) = token_stream.next().await {
+    while let Some(token) = token_stream.recv().await {
         match token {
             Ok(token) => set_exchange.update(|exchange|
                 exchange.assistant_message.push_str(&token)),
@@ -155,6 +195,12 @@ async fn collect_tokens(
             }
         }
     }
+}
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(catch, js_namespace = ["window", "__TAURI__", "event"])]
+    async fn emit(cmd: &str, args: JsValue) -> Result<JsValue, JsValue>;
 }
 
 #[component]
@@ -235,6 +281,12 @@ pub fn Chat(
         });
     };
 
+    let on_cancel = move || spawn_local(async move {
+        if let Err(_) = emit("cancel", JsValue::null()).await {
+            set_error("Unable to cancel stream.".into());
+        }
+    });
+
     view! {
         <div class="flex flex-col md:w-[80vw] md:mx-auto h-full p-4 md:py-[5vh] overflow-y-hidden"
                 style:display=move || (menu.get() != Menu::Chat).then(|| "None")>
@@ -268,8 +320,7 @@ pub fn Chat(
                     to_hide=streaming.into() on_click=Box::new(on_submit) />
                 <div class="flex ml-auto">
                     <Button class="mr-4 md:mr-8" label="Cancel"
-                        to_hide=Signal::derive(move || !streaming()) on_click=Box::new(||
-                            spawn_local(cancel().map(drop))) />
+                        to_hide=Signal::derive(move || !streaming()) on_click=Box::new(on_cancel) />
                     <Button class="" label="Menu"
                         to_hide=create_signal(false).0.into()
                         on_click=Box::new(move || set_menu(Menu::Menu)) />

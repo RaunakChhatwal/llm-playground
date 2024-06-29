@@ -54,8 +54,7 @@ pub fn command(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
             match invoke(function_name, arguments_jsvalue).await {
                 Ok(result) => Ok(JsValue::into_serde(&result)?),
-                Err(error) => Err(JsValue::into_serde::<serde_error::Error>(&error)
-                    .ok()
+                Err(error) => Err(JsValue::into_serde::<serde_error::Error>(&error).ok()
                     .map(anyhow::Error::from)
                     .unwrap_or(anyhow!("Error invoking {function_name}")))
             }

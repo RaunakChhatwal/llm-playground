@@ -2,10 +2,9 @@ use anyhow::{anyhow, Result};
 use common::{APIKey, Config, Exchange, Provider, to_serde_err};
 use futures::StreamExt;
 use reqwest::{header::{HeaderMap, HeaderValue, CONTENT_TYPE}, RequestBuilder};
-use reqwest_eventsource::EventSource;
+use reqwest_eventsource::{Event, EventSource};
 use serde_error::Error;
 use serde_json::{json, Value};
-use tokio::sync::{mpsc::{UnboundedSender, UnboundedReceiver}, Mutex, Notify};
 
 fn build_request(api_key: &APIKey) -> Result<RequestBuilder> {
     let mut headers = HeaderMap::new();
@@ -64,7 +63,7 @@ fn build_request_body(
 fn interpret_message(
     message: eventsource_stream::Event,
     provider: Provider
-) -> Result<Option<String>> {   // Ok(None) represents response end
+) -> Result<Option<String>, Error> {   // Ok(None) represents response end
     match provider {
         Provider::OpenAI => {
             if message.data.trim() == "[DONE]" {
@@ -82,7 +81,7 @@ fn interpret_message(
                         .as_str()
                         .map(|token| token.to_string())
                 })
-                .ok_or(anyhow!("Error parsing response."));
+                .ok_or(to_serde_err(anyhow!("Error parsing response.")));
 
             return token_result.map(|token| Some(token));
         },
@@ -97,52 +96,33 @@ fn interpret_message(
                     .as_str()
                     .map(|token| token.to_string())
                 )
-                .ok_or(anyhow!("Error parsing response."));
+                .ok_or(to_serde_err(anyhow!("Error parsing response.")));
 
             return token_result.map(|token| Some(token));
         }
     }
 }
 
-lazy_static::lazy_static! {
-    pub static ref CHANNEL: (
-        UnboundedSender<Result<Option<String>>>,
-        Mutex<UnboundedReceiver<Result<Option<String>>>>
-    ) = {
-        let (sender, recv) = tokio::sync::mpsc::unbounded_channel();
-        (sender, Mutex::new(recv))
-    };
-}
-
-async fn clear_channel() {
-    let mut recv = CHANNEL.1.lock().await;
-    while let Ok(Ok(Some(token))) = recv.try_recv() {
-        drop(token);
-    }
-}
-
-lazy_static::lazy_static! {
-    static ref CANCEL_NOTIFY: Notify = Notify::new();
-}
-
 async fn collect_tokens(
-    mut event_source: reqwest_eventsource::EventSource,
-    sender: UnboundedSender<Result<Option<String>>>,
-    provider: Provider
-) {
-    use reqwest_eventsource::Event;
+    provider: Provider,
+    mut event_source: EventSource,
+    window: tauri::Window
+) -> Result<()> {
+    let cancel = std::sync::Arc::new(tokio::sync::Notify::new());
+    let id = window.listen("cancel", {
+        let cancel = cancel.clone();
+        move |_| cancel.notify_one()
+    });
 
     loop {
         tokio::select! {
-            _ = CANCEL_NOTIFY.notified() => {
-                let _ = sender.send(Ok(None));
-                event_source.close();
+            _ = cancel.notified() => {
+                let _ = window.emit("token", Ok::<_, String>(None::<String>));
                 break;
             }
             event = event_source.next() => {
                 let Some(event) = event else {
-                    let _ = sender.send(Ok(None));
-                    event_source.close();
+                    let _ = window.emit("token", Ok::<_, String>(None::<String>));
                     break;
                 };
 
@@ -151,35 +131,33 @@ async fn collect_tokens(
                     Ok(Event::Message(message)) =>
                         interpret_message(message, provider),
                     Err(reqwest_eventsource::Error::StreamEnded) => Ok(None),
-                    Err(error) => Err(error.into())
+                    Err(error) => Err(Error::new(&error))
                 };
-                let whether_stop = token
-                    .as_ref()
-                    .map(Option::is_none)
-                    .unwrap_or(false);
 
-                if let Err(_) = sender.send(token) {
-                    event_source.close();
+                if let Err(_) = window.emit("token", &token) {
                     break;
                 }
 
-                if whether_stop {
-                    event_source.close();
+                if token.as_ref().map(Option::is_none).unwrap_or(false) {
                     break;
                 }
             }
         }
     }
+
+    event_source.close();
+    window.unlisten(id);
+
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn build_token_stream(
+    window: tauri::Window,
     prompt: &str,
     config: Config,
     exchanges: Vec<Exchange>
 ) -> Result<(), Error> {
-    clear_channel().await;
-
     let api_key = config.api_keys[config.api_key
         .ok_or(to_serde_err(anyhow!("No API Key selected.")))?].clone();
 
@@ -189,19 +167,8 @@ pub async fn build_token_stream(
 
     let event_source = EventSource::new(request_builder)
         .map_err(|error| Error::new(&error))?;
-    let sender = CHANNEL.0.clone();
-    tokio::spawn(collect_tokens(event_source, sender, api_key.provider));
+
+    tokio::spawn(collect_tokens(api_key.provider, event_source, window));
 
     Ok(())
-}
-
-#[tauri::command]
-pub async fn fetch_tokens() -> Result<Option<String>, Error> {
-    let mut recv = CHANNEL.1.lock().await;
-    return recv.recv().await.unwrap_or(Ok(None)).map_err(to_serde_err);
-}
-
-#[tauri::command]
-pub fn cancel() {
-    CANCEL_NOTIFY.notify_waiters();
 }

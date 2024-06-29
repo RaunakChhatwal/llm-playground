@@ -12,12 +12,6 @@ pub async fn build_token_stream(
 ) -> Result<()> {}
 
 #[macros::command]
-pub async fn cancel() -> Result<()> {}
-
-#[macros::command]
-pub async fn fetch_tokens() -> Result<Option<String>> {}
-
-#[macros::command]
 pub async fn load_config() -> Result<Config> {}
 
 #[macros::command]

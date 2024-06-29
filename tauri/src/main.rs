@@ -8,7 +8,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use sea_orm::{ActiveModelTrait, ColumnTrait, Database, EntityTrait, QueryFilter, Set, TransactionTrait};
 use serde_error::Error;
 use tokio::sync::Mutex;
-use fetch_tokens::{build_token_stream, cancel, fetch_tokens};
+use fetch_tokens::build_token_stream;
 
 mod fetch_tokens;
 
@@ -282,8 +282,6 @@ async fn main() -> Result<()> {
         .invoke_handler(tauri::generate_handler![
             add_conversation,
             build_token_stream,
-            cancel,
-            fetch_tokens,
             load_config,
             load_conversations,
             poll_config_change,
