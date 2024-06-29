@@ -1,9 +1,9 @@
 {
   "build": {
-    "beforeDevCommand": "cd leptos; trunk serve",
-    "beforeBuildCommand": "cd leptos; trunk build",
+    "beforeDevCommand": "cd ui; trunk serve",
+    "beforeBuildCommand": "cd ui; trunk build",
     "devPath": "http://localhost:1420",
-    "distDir": "../leptos/dist",
+    "distDir": "../ui/dist",
     "withGlobalTauri": true
   },
   "package": {
