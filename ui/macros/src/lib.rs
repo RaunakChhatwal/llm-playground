@@ -49,10 +49,10 @@ pub fn command(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
             let mut arguments_map = serde_json::Map::new();
             #(#insert_statements)*
-            let arguments_JsValue = JsValue::from_serde(&serde_json::Value::Object(arguments_map))
+            let arguments_jsvalue = JsValue::from_serde(&serde_json::Value::Object(arguments_map))
                 .context(format!("Error serializing arguments to {function_name}"))?;
 
-            match invoke(function_name, arguments_JsValue).await {
+            match invoke(function_name, arguments_jsvalue).await {
                 Ok(result) => Ok(JsValue::into_serde(&result)?),
                 Err(error) => Err(JsValue::into_serde::<serde_error::Error>(&error)
                     .ok()
