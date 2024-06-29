@@ -4,7 +4,7 @@ use futures::FutureExt;
 use futures::{channel::mpsc::UnboundedReceiver, SinkExt, StreamExt};
 use leptos::*;
 use wasm_bindgen::prelude::*;
-use crate::commands::{cancel, fetch_tokens};
+use crate::commands::{add_conversation, cancel, fetch_tokens};
 use crate::util::{Button, ErrorMessage, Menu};
 
 #[component]
@@ -165,10 +165,35 @@ pub fn Chat(
 ) -> impl IntoView {
     let (error, set_error) = create_signal("".to_string());
     let counter = create_rw_signal(0);
+    let (conversation_uuid, set_conversation_uuid) = create_signal(None::<uuid::Uuid>);
     let (exchanges, set_exchanges) = create_signal(Vec::<(usize, RwSignal<Exchange>)>::new());
     let (new_exchange, set_new_exchange) = create_signal(Exchange::default());
     let (prompt, set_prompt) = create_signal("".to_string());
     let (streaming, set_streaming) = create_signal(false);
+
+    create_effect(move |_| {
+        let exchanges = exchanges().into_iter()
+            .map(|(key, exchange)| (key, exchange.get_untracked()))
+            .collect::<Vec<_>>();
+        spawn_local(async move {
+            if let Some(conversation_uuid) = conversation_uuid.get_untracked() {
+                match crate::commands::set_exchanges(conversation_uuid, exchanges).await {
+                    // if a different window deletes the current conversation
+                    // a new one is created with a new uuid
+                    Ok(Some(uuid)) => set_conversation_uuid(Some(uuid)),
+                    // error saving exchanges
+                    Err(error) => set_error(error.to_string()),
+                    // exchanges were successfully saved to conversation
+                    _ => ()
+                }
+            } else {
+                match add_conversation(exchanges).await {
+                    Ok(uuid) => set_conversation_uuid(Some(uuid)),
+                    Err(error) => set_error(error.to_string()),
+                }
+            }
+        });
+    });
 
     let on_new = move || {
         counter.set(0);
@@ -182,9 +207,8 @@ pub fn Chat(
         set_prompt("".to_string());
         let exchanges = exchanges.get_untracked()
             .iter()
-            .map(|(_, exchange)|
-                exchange())
-            .collect::<Vec<Exchange>>();
+            .map(|(_, exchange)| exchange.get_untracked())
+            .collect::<Vec<_>>();
 
         set_new_exchange(Exchange {
             user_message: prompt.clone(),

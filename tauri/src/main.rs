@@ -1,11 +1,11 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{path::Path, sync::mpsc::{Receiver, Sender}};
+use std::{ops::Deref, path::Path, sync::mpsc::{Receiver, Sender}};
 use anyhow::{anyhow, Context, Result};
-use common::{Config, Conversation, to_serde_err};
+use common::{to_serde_err, Config, Conversation, Exchange};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use sea_orm::{Database, EntityTrait};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Database, EntityTrait, QueryFilter, Set, TransactionTrait};
 use serde_error::Error;
 use tokio::sync::Mutex;
 use fetch_tokens::{build_token_stream, cancel, fetch_tokens};
@@ -96,6 +96,21 @@ async fn poll_config_change() -> Result<Config, Error> {
     }
 }
 
+// the database connection to <config-dir>/conversations.db
+// I chose sqlite over json for consistency
+lazy_static::lazy_static! {
+    static ref CONN: Result<sea_orm::DatabaseConnection> = futures::executor::block_on(async {
+        let db_path = config_dir().await?
+            .join("conversations.db")
+            .to_str()
+            .map(str::to_string)
+            .ok_or(anyhow!("Unable to connect to database."))?;
+
+        Database::connect(&format!("sqlite://{}", db_path)).await
+            .map_err(Into::into)
+    });
+}
+
 lazy_static::lazy_static! {
     static ref CONVERSATIONS_CHANNEL: (
         Sender<Result<notify::Event, notify::Error>>,
@@ -108,19 +123,13 @@ lazy_static::lazy_static! {
 }
 
 async fn _load_conversations() -> Result<Vec<Conversation>> {
-    let db_path = config_dir().await?
-        .join("conversations.db")
-        .to_str()
-        .map(str::to_string)
-        .ok_or(anyhow!("Unable to connect to database."))?;
-    let connection = Database::connect(&format!("sqlite://{}", db_path)).await?;
-
+    let conn = CONN.as_ref().map_err(Deref::deref)?;
     let conversations: Vec<(
         entity::conversations::Model,
         Option<entity::exchanges::Model>
     )> = entity::conversations::Entity::find()
         .find_also_related(entity::exchanges::Entity)
-        .all(&connection).await?;
+        .all(conn).await?;
 
     return Ok(conversations.into_iter()
         .filter_map(|(conversation, exchange)| Some(Conversation {
@@ -134,7 +143,7 @@ async fn _load_conversations() -> Result<Vec<Conversation>> {
 #[tauri::command]
 async fn load_conversations() -> Result<Vec<Conversation>, Error> {
     _load_conversations().await
-        .context("Unable to connect to conversations.db")
+        .context("Unable to load conversations")
         .map_err(to_serde_err)
 }
 
@@ -166,6 +175,99 @@ async fn poll_conversations_change() -> Result<Vec<Conversation>, Error> {
     }
 }
 
+async fn add_exchanges(
+    conversation_id: i32,
+    exchanges: Vec<(usize, Exchange)>,
+    txn: &sea_orm::DatabaseTransaction
+) -> Result<Vec<entity::exchanges::Model>> {
+    futures::future::join_all(exchanges.into_iter().map(|(key, exchange)| async move {
+        entity::exchanges::ActiveModel {
+            key: Set(key.try_into()?),
+            user_message: Set(exchange.user_message),
+            assistant_message: Set(exchange.assistant_message),
+            conversation: Set(conversation_id),
+            ..Default::default()
+        }.insert(txn).await.map_err(anyhow::Error::from)
+    })).await.into_iter().collect::<Result<Vec<_>, _>>()
+}
+
+async fn _add_conversation(mut exchanges: Vec<(usize, Exchange)>) -> Result<uuid::Uuid> {
+    let txn = CONN.as_ref().map_err(Deref::deref)?.begin().await?;
+
+    if exchanges.is_empty() {
+        anyhow::bail!("Conversation cannot be set empty.");
+    }
+    let (first_exchange_key, first_exchange) = exchanges.remove(0);
+    let first_exchange = entity::exchanges::ActiveModel {
+        key: Set(first_exchange_key.try_into()?),
+        user_message: Set(first_exchange.user_message),
+        assistant_message: Set(first_exchange.assistant_message),
+        conversation: Set(-1),
+        ..Default::default()
+    }.insert(&txn).await?;
+
+    let conversation_uuid = uuid::Uuid::new_v4();
+    let conversation = entity::conversations::ActiveModel {
+        uuid: Set(conversation_uuid.into()),
+        last_updated: Set(chrono::Utc::now().timestamp()),
+        first_exchange: Set(first_exchange.id),
+        ..Default::default()
+    }.insert(&txn).await?;
+
+    add_exchanges(conversation.id, exchanges, &txn).await?;
+    let mut first_exchange = entity::exchanges::ActiveModel::from(first_exchange);
+    first_exchange.conversation = Set(conversation.id);
+    first_exchange.update(&txn).await?;
+
+    txn.commit().await?;
+
+    return Ok(conversation_uuid);
+}
+
+#[tauri::command]
+async fn add_conversation(exchanges: Vec<(usize, Exchange)>) -> Result<uuid::Uuid, Error> {
+    _add_conversation(exchanges).await.map_err(to_serde_err)
+}
+
+async fn _set_exchanges(
+    conversation_uuid: uuid::Uuid,
+    exchanges: Vec<(usize, Exchange)>
+) -> Result<Option<uuid::Uuid>> {
+    let txn = CONN.as_ref().map_err(Deref::deref)?.begin().await?;
+
+    let conversation = entity::conversations::Entity::find()
+        .filter(entity::conversations::Column::Uuid.eq(conversation_uuid))
+        .one(&txn).await?;
+    let Some(conversation) = conversation else {
+        return Ok(Some(_add_conversation(exchanges).await?));
+    };
+
+    // remove exchanges from database
+    entity::exchanges::Entity::delete_many()
+        .filter(entity::exchanges::Column::Conversation.eq(conversation.id))
+        .exec(&txn).await?;
+
+    let exchanges = add_exchanges(conversation.id, exchanges, &txn).await?;
+    let first_exchange = exchanges.get(0).ok_or(anyhow!("Conversation cannot be set empty."))?;
+
+    let mut conversation = entity::conversations::ActiveModel::from(conversation);
+    conversation.first_exchange = Set(first_exchange.id);
+    conversation.last_updated = Set(chrono::Utc::now().timestamp());
+    conversation.update(&txn).await?;
+
+    txn.commit().await?;
+
+    return Ok(None);
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn set_exchanges(
+    conversation_uuid: uuid::Uuid,
+    exchanges: Vec<(usize, Exchange)>
+) -> Result<Option<uuid::Uuid>, Error> {
+    _set_exchanges(conversation_uuid, exchanges).await.map_err(to_serde_err)
+}
+
 fn watch_file(sender: Sender<Result<notify::Event, notify::Error>>, file: &Path) -> Result<()> {
     let mut watcher = RecommendedWatcher::new(sender, Default::default())?;
     watcher.watch(file, RecursiveMode::Recursive).map_err(Into::into)
@@ -178,6 +280,7 @@ async fn main() -> Result<()> {
 
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
+            add_conversation,
             build_token_stream,
             cancel,
             fetch_tokens,
@@ -185,7 +288,8 @@ async fn main() -> Result<()> {
             load_conversations,
             poll_config_change,
             poll_conversations_change,
-            save_config
+            save_config,
+            set_exchanges
         ])
         .run(tauri::generate_context!())
         .map_err(Into::into)
