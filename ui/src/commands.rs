@@ -15,9 +15,6 @@ pub async fn build_token_stream(
 pub async fn load_config() -> Result<Config> {}
 
 #[macros::command]
-pub async fn poll_config_change() -> Result<Config> {}
-
-#[macros::command]
 pub async fn save_config(config: Config) -> Result<()> {}
 
 #[macros::command]

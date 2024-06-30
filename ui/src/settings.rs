@@ -3,8 +3,8 @@ use common::{APIKey, Config, Provider};
 use leptos::*;
 use strum::VariantNames;
 use wasm_bindgen::prelude::*;
-use crate::commands::{load_config, poll_config_change, save_config};
-use crate::util::{Button, ErrorMessage, Menu};
+use crate::commands::{load_config, save_config};
+use crate::util::{listen, Button, ErrorMessage, Menu};
 
 #[component]
 fn TemperatureSlider(
@@ -290,13 +290,20 @@ pub fn Settings(
     });
 
     spawn_local(async move {
-        loop {
-            // wait until the user/another window/this window changes the config
-            match poll_config_change().await {
+        // listen for when the user/another window/this window changes the config
+        let on_update = Closure::new(move |_| spawn_local(async move {
+            match load_config().await {
                 Ok(config) => set_saved_config(Some(config)),
-                Err(error_message) => set_error(error_message.to_string())
+                Err(error) => set_error(error.to_string())
             }
+        }));
+
+        if let Err(_) = listen("config_updated", &on_update).await {
+            set_error("Error listening for config updates".into());
         }
+
+        // keep on_update alive forever
+        std::mem::forget(on_update);
     });
 
     let to_hide = Signal::derive(move || {

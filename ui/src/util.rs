@@ -1,4 +1,5 @@
 use leptos::*;
+use wasm_bindgen::{JsValue, prelude::*};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Menu {
@@ -34,4 +35,14 @@ pub fn Button(
             style:display=move || to_hide().then(|| "None")
         >{label}</button>
     }
+}
+
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(catch, js_namespace = ["window", "__TAURI__", "event"])]
+    pub async fn listen(
+        cmd: &str,
+        cb: &Closure<dyn Fn(JsValue)>
+    ) -> Result<JsValue, JsValue>;
 }

@@ -1,13 +1,13 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{ops::Deref, path::Path, sync::mpsc::{Receiver, Sender}};
+use std::{ops::Deref, path::Path};
 use anyhow::{anyhow, Context, Result};
 use common::{to_serde_err, Config, Conversation, Exchange};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use sea_orm::{ActiveModelTrait, ColumnTrait, Database, EntityTrait, QueryFilter, Set, TransactionTrait};
 use serde_error::Error;
-use tokio::sync::Mutex;
+use tauri::Manager;
 use fetch_tokens::build_token_stream;
 
 mod fetch_tokens;
@@ -57,45 +57,6 @@ async fn save_config(config: Config) -> Result<(), Error> {
         .map_err(|error| Error::new(&error))
 }
 
-lazy_static::lazy_static! {
-    static ref CONFIG_CHANNEL: (
-        Sender<Result<notify::Event, notify::Error>>,
-        Mutex<Receiver<Result<notify::Event, notify::Error>>>
-    ) = {
-        // std::sync::mpsc because tokio::sync::mpsc doesn't implement notify::EventHandler
-        let (sender, recv) = std::sync::mpsc::channel();
-        (sender, Mutex::new(recv))
-    };
-}
-
-#[tauri::command]
-async fn poll_config_change() -> Result<Config, Error> {
-    let poll_config_change = || async {
-        let recv = CONFIG_CHANNEL.1.lock().await;
-        loop {
-            let event = match recv.recv()  {
-                Ok(Ok(event)) => event,
-                Ok(Err(error)) => return Err(Error::new(&error)),
-                Err(error) => return Err(Error::new(&error))
-            };
-            return match event.kind {
-                notify::EventKind::Create(_)
-                | notify::EventKind::Modify(_)
-                | notify::EventKind::Remove(_) => load_config().await,
-                // ignore miscellaneous events
-                _ => continue
-            };
-        }
-    };
-
-    loop {
-        // spawning because recv is sync
-        if let Ok(config_result) = tokio::spawn(poll_config_change()).await {
-            return config_result;
-        }
-    }
-}
-
 // the database connection to <config-dir>/conversations.db
 // I chose sqlite over json for consistency
 lazy_static::lazy_static! {
@@ -109,17 +70,6 @@ lazy_static::lazy_static! {
         Database::connect(&format!("sqlite://{}", db_path)).await
             .map_err(Into::into)
     });
-}
-
-lazy_static::lazy_static! {
-    static ref CONVERSATIONS_CHANNEL: (
-        Sender<Result<notify::Event, notify::Error>>,
-        Mutex<Receiver<Result<notify::Event, notify::Error>>>
-    ) = {
-        // std::sync::mpsc because tokio::sync::mpsc doesn't implement notify::EventHandler
-        let (sender, recv) = std::sync::mpsc::channel();
-        (sender, Mutex::new(recv))
-    };
 }
 
 async fn _load_conversations() -> Result<Vec<Conversation>> {
@@ -145,34 +95,6 @@ async fn load_conversations() -> Result<Vec<Conversation>, Error> {
     _load_conversations().await
         .context("Unable to load conversations")
         .map_err(to_serde_err)
-}
-
-#[tauri::command]
-async fn poll_conversations_change() -> Result<Vec<Conversation>, Error> {
-    let poll_conversations_change = || async {
-        let recv = CONVERSATIONS_CHANNEL.1.lock().await;
-        loop {
-            let event = match recv.recv() {
-                Ok(Ok(event)) => event,
-                Ok(Err(error)) => return Err(Error::new(&error)),
-                Err(error) => return Err(Error::new(&error))
-            };
-            return match event.kind {
-                notify::EventKind::Create(_)
-                | notify::EventKind::Modify(_)
-                | notify::EventKind::Remove(_) => load_conversations().await,
-                // ignore miscellaneous events
-                _ => continue
-            };
-        }
-    };
-
-    loop {
-        // spawning because recv is sync
-        if let Ok(conversations_result) = tokio::spawn(poll_conversations_change()).await {
-            return conversations_result;
-        }
-    }
 }
 
 async fn add_exchanges(
@@ -268,24 +190,60 @@ async fn set_exchanges(
     _set_exchanges(conversation_uuid, exchanges).await.map_err(to_serde_err)
 }
 
-fn watch_file(sender: Sender<Result<notify::Event, notify::Error>>, file: &Path) -> Result<()> {
+fn watch_file(app: tauri::AppHandle, event_name: &'static str, file: &Path) -> Result<()> {
+    let (sender, recv) = std::sync::mpsc::channel::<Result<notify::Event, notify::Error>>();
+
+    let emit = move || app.emit_all(event_name, ()).unwrap_or_else(|error|
+        eprintln!("Error triggering {event_name}: {error}"));
+
+    std::thread::spawn(move || loop {
+        let event= match recv.recv() {
+            Ok(Ok(event)) => event,
+            Ok(Err(error)) => {
+                eprintln!("Error listening for {event_name}: {error}");
+                emit();
+                continue;
+            },
+            // this means the recv is closed, should never happen
+            Err(_) => {
+                eprintln!("Watcher disconnected!");
+                // not breaking will result in an infinite loop
+                break;
+            }
+        };
+        match event.kind {
+            notify::EventKind::Create(_)
+            | notify::EventKind::Modify(_)
+            | notify::EventKind::Remove(_) => emit(),
+            // ignore miscellaneous events
+            _ => continue
+        }
+    });
+
     let mut watcher = RecommendedWatcher::new(sender, Default::default())?;
-    watcher.watch(file, RecursiveMode::Recursive).map_err(Into::into)
+    watcher.watch(file, RecursiveMode::Recursive)?;
+    std::mem::forget(watcher);
+
+    Ok(())
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    watch_file(CONFIG_CHANNEL.0.clone(), &config_dir().await?.join("config.json"))?;
-    watch_file(CONVERSATIONS_CHANNEL.0.clone(), &config_dir().await?.join("conversations.db"))?;
-
     tauri::Builder::default()
+        .setup(|app| {
+            let app = app.handle();
+            futures::executor::block_on(tokio::spawn(async {
+                watch_file(app.clone(), "config_updated", &config_dir().await?.join("config.json"))?;
+                watch_file(app, "conversations_updated", &config_dir().await?.join("conversations.db"))?;
+
+                Ok::<(), anyhow::Error>(())
+            })).unwrap_or_else(|error| Err(error.into())).map_err(Into::into)
+        })
         .invoke_handler(tauri::generate_handler![
             add_conversation,
             build_token_stream,
             load_config,
             load_conversations,
-            poll_config_change,
-            poll_conversations_change,
             save_config,
             set_exchanges
         ])

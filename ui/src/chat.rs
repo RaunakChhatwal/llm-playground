@@ -5,7 +5,7 @@ use leptos::*;
 use tokio::sync::mpsc::UnboundedReceiver;
 use wasm_bindgen::{JsValue, prelude::*};
 use crate::commands::add_conversation;
-use crate::util::{Button, ErrorMessage, Menu};
+use crate::util::{listen, Button, ErrorMessage, Menu};
 
 #[component]
 fn MessageBox(
@@ -116,15 +116,6 @@ fn Exchanges(
                 } />
         </div>
     }
-}
-
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(catch, js_namespace = ["window", "__TAURI__", "event"])]
-    async fn listen(
-        cmd: &str,
-        cb: &Closure<dyn Fn(JsValue)>
-    ) -> Result<JsValue, JsValue>;
 }
 
 fn deserialize_event(event: JsValue) -> Result<Option<String>> {
