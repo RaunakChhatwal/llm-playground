@@ -9,11 +9,11 @@ use crate::util::{listen, Button, ErrorMessage, Menu};
 #[component]
 fn TemperatureSlider(
     config: RwSignal<Config>,
-    set_error: WriteSignal<String>)
+    error: RwSignal<String>)
 -> impl IntoView {
     let on_input = move |event| {
         let Ok(temperature) = event_target_value(&event).parse::<f64>() else {
-            set_error("The slider should only permit numbers.".into());
+            error.set("The slider should only permit numbers.".into());
             return;
         };
         config.update(|config| config.temperature = temperature);
@@ -47,11 +47,11 @@ fn TemperatureSlider(
 #[component]
 fn MaxTokensSlider(
     config: RwSignal<Config>,
-    set_error: WriteSignal<String>
+    error: RwSignal<String>
 ) -> impl IntoView {
     let on_input = move |event| {
         let Ok(max_tokens) = event_target_value(&event).parse::<u32>() else {
-            set_error("The slider should only permit integers due to its integer step.".into());
+            error.set("The slider should only permit integers due to its integer step.".into());
             return;
         };
         config.update(|config| config.max_tokens = max_tokens);
@@ -135,7 +135,7 @@ fn KeyEntry(
 }
 
 #[component]
-fn KeyInput(new_key: RwSignal<Option<APIKey>>, set_error: WriteSignal<String>) -> impl IntoView {
+fn KeyInput(new_key: RwSignal<Option<APIKey>>, error: RwSignal<String>) -> impl IntoView {
     create_effect(move |_| {
         let new_provider = new_key().map(|new_key| new_key.provider.to_string());
         for &provider in Provider::VARIANTS {
@@ -143,7 +143,7 @@ fn KeyInput(new_key: RwSignal<Option<APIKey>>, set_error: WriteSignal<String>) -
                 .and_then(|element|
                     element.dyn_into::<web_sys::HtmlInputElement>().ok());
             let Some(input) = input else {
-                set_error(format!("Expected checkbox entry for {provider}"));
+                error.set(format!("Expected checkbox entry for {provider}"));
                 continue;
             };
 
@@ -189,7 +189,7 @@ fn KeyInput(new_key: RwSignal<Option<APIKey>>, set_error: WriteSignal<String>) -
 }
 
 #[component]
-fn KeyList(config: RwSignal<Config>, set_error: WriteSignal<String>) -> impl IntoView {
+fn KeyList(config: RwSignal<Config>, error: RwSignal<String>) -> impl IntoView {
     let (api_keys, set_api_keys) = create_slice(
         config,
         |config| config.api_keys.clone(),
@@ -225,18 +225,18 @@ fn KeyList(config: RwSignal<Config>, set_error: WriteSignal<String>) -> impl Int
         if let Some(mut new_api_key) = new_key.get_untracked() {
             new_api_key.name = new_api_key.name.trim().into();
             if new_api_key.name.is_empty() {
-                set_error("API key name must be non-empty.".into());
+                error.set("API key name must be non-empty.".into());
                 return;
             }
             let mut api_keys = api_keys();
             if api_keys.iter().any(|api_key| api_key.name == new_api_key.name) {
-                set_error("New key name must be unique.".into());
+                error.set("New key name must be unique.".into());
                 return;
             }
             new_key.set(None);
             api_keys.push(new_api_key);
             set_api_keys(api_keys);
-            set_error("".into());
+            error.set("".into());
         } else {
             new_key.set(Some(APIKey::default()));
         }
@@ -255,7 +255,7 @@ fn KeyList(config: RwSignal<Config>, set_error: WriteSignal<String>) -> impl Int
                         <KeyEntry api_key selected_key on_remove=Box::new(on_remove) />
                     } />
             </div>
-            <KeyInput new_key set_error />
+            <KeyInput new_key error />
             <div class="flex">
                 <button class=format!("mr-2 {}", button_classes)
                     style:display=move || new_key().is_none().then(|| "None")
@@ -269,23 +269,21 @@ fn KeyList(config: RwSignal<Config>, set_error: WriteSignal<String>) -> impl Int
 
 #[component]
 pub fn Settings(
-    active_config: ReadSignal<Config>,
-    set_active_config: WriteSignal<Config>,
-    menu: ReadSignal<Menu>,
-    set_menu: WriteSignal<Menu>
+    active_config: RwSignal<Config>,
+    menu: RwSignal<Menu>,
 ) -> impl IntoView {
-    let (error, set_error) = create_signal("".to_string());
+    let error = create_rw_signal("".to_string());
     let config = create_rw_signal(Config::default());
-    let (saved_config, set_saved_config) = create_signal(None);
+    let saved_config = create_rw_signal(None);
 
     spawn_local(async move {
         match load_config().await {
             Ok(loaded_config) => {
                 config.set(loaded_config.clone());
-                set_active_config(loaded_config.clone());
-                set_saved_config(Some(loaded_config));
+                active_config.set(loaded_config.clone());
+                saved_config.set(Some(loaded_config));
             },
-            Err(error) => set_error(error.to_string())
+            Err(err) => error.set(err.to_string())
         }
     });
 
@@ -293,13 +291,13 @@ pub fn Settings(
         // listen for when the user/another window/this window changes the config
         let on_update = Closure::new(move |_| spawn_local(async move {
             match load_config().await {
-                Ok(config) => set_saved_config(Some(config)),
-                Err(error) => set_error(error.to_string())
+                Ok(config) => saved_config.set(Some(config)),
+                Err(err) => error.set(err.to_string())
             }
         }));
 
         if let Err(_) = listen("config_updated", &on_update).await {
-            set_error("Error listening for config updates".into());
+            error.set("Error listening for config updates".into());
         }
 
         // keep on_update alive forever
@@ -314,20 +312,20 @@ pub fn Settings(
     let on_discard = move || {
         if let Some(saved_config) = saved_config.get_untracked() {
             config.set(saved_config.clone());
-            set_active_config(saved_config);
+            active_config.set(saved_config);
         } else {
-            set_error("Bad config.".into());
+            error.set("Bad config.".into());
         };
     };
 
     let on_apply = move || spawn_local(async move {
         let config = config.get_untracked();
-        set_active_config(config.clone());
+        active_config.set(config.clone());
         if let Err(error_message) = save_config(config.clone()).await {
-            set_error(error_message.to_string());
+            error.set(error_message.to_string());
         } else {
-            set_saved_config(Some(config));
-            set_error("".into());
+            saved_config.set(Some(config));
+            error.set("".into());
         }
     });
 
@@ -337,15 +335,15 @@ pub fn Settings(
                 style:display=move || (menu.get() != Menu::Settings).then(|| "None")>
             <Button class="mr-auto" label="Back"
                 to_hide=create_signal(false).0.into()
-                on_click=Box::new(move || set_menu(Menu::Menu)) />
+                on_click=Box::new(move || menu.set(Menu::Menu)) />
             <h1 class="text-[1.25em]">"Settings"</h1>
             <div class="w-full mt-2"><ErrorMessage error /></div>
             <div class="grid grid-cols-[repeat(2,max-content)] gap-[6.5vh]
                     items-center my-auto overflow-y-auto">
-                <TemperatureSlider config set_error />
-                <MaxTokensSlider config set_error />
+                <TemperatureSlider config error />
+                <MaxTokensSlider config error />
                 <ModelInput config />
-                <KeyList config set_error />
+                <KeyList config error />
             </div>
             <div class="flex justify-end mb-[4vh] md:mb-[8vh] w-full">
                 <Button class="mr-4" label="Discard" to_hide on_click=Box::new(on_discard) />

@@ -65,7 +65,7 @@ fn MessageBox(
 fn ExchangeComponent(
     id: usize,
     exchange: RwSignal<Exchange>,
-    set_exchanges: WriteSignal<Vec<(usize, RwSignal<Exchange>)>>
+    exchanges: RwSignal<Vec<(usize, RwSignal<Exchange>)>>
 ) -> impl IntoView {
     let (user_message, set_user_message) = create_slice(
         exchange, 
@@ -79,7 +79,7 @@ fn ExchangeComponent(
     );
 
     let on_delete = move || {
-        set_exchanges.update(|exchanges|
+        exchanges.update(|exchanges|
             exchanges.retain(|(exchange_id, _)| id != *exchange_id))};
 
     view! {
@@ -102,18 +102,28 @@ fn ExchangeComponent(
 
 #[component]
 fn Exchanges(
-    exchanges: ReadSignal<Vec<(usize, RwSignal<Exchange>)>>,
-    set_exchanges: WriteSignal<Vec<(usize, RwSignal<Exchange>)>>
+    new_exchange: RwSignal<Exchange>,
+    exchanges: RwSignal<Vec<(usize, RwSignal<Exchange>)>>,
+    streaming: RwSignal<bool>
 ) -> impl IntoView {
     view! {
-        <div class="flex flex-col">
-            <For each=exchanges
-                key=|exchange| exchange.0
-                children=move |(id, exchange)| view! {
-                    <div style:margin-top=move || (id != exchanges()[0].0).then(|| "12px")>
-                        <ExchangeComponent id exchange set_exchanges />
-                    </div>
-                } />
+        <div style:display=move || (exchanges().is_empty() && !streaming()).then(|| "None")>
+            <div class="flex flex-col">
+                <For each=exchanges
+                    key=|exchange| exchange.0
+                    children=move |(id, exchange)| view! {
+                        <div style:margin-top=move || (id != exchanges()[0].0).then(|| "12px")>
+                            <ExchangeComponent id exchange exchanges />
+                        </div>
+                    } />
+            </div>
+            <p class="px-2 py-1 min-h-[2em] bg-[#222222] border-2 border-[#303038] text-[0.9em]"
+                style:margin-top=move || (!exchanges().is_empty()).then(|| "12px")
+                style:display=move || (!streaming()).then(|| "None")
+            >{move || new_exchange().user_message}</p>
+            <p class="mt-[12px] px-2 py-1 min-h-[2em] bg-[#222222] border-2 border-[#303038] text-[0.9em]"
+                style:display=move || (!streaming()).then(|| "None")
+            >{move || new_exchange().assistant_message}</p>
         </div>
     }
 }
@@ -173,15 +183,15 @@ async fn build_token_stream(prompt: &str, config: Config, exchanges: Vec<Exchang
 
 async fn collect_tokens(
     mut token_stream: UnboundedReceiver<Result<String>>,
-    set_exchange: WriteSignal<Exchange>,
-    set_error: WriteSignal<String>
+    exchange: RwSignal<Exchange>,
+    error: RwSignal<String>
 ) {
     while let Some(token) = token_stream.recv().await {
         match token {
-            Ok(token) => set_exchange.update(|exchange|
+            Ok(token) => exchange.update(|exchange|
                 exchange.assistant_message.push_str(&token)),
-            Err(error) => {
-                set_error(error.to_string());
+            Err(err) => {
+                error.set(err.to_string());
                 break;
             }
         }
@@ -195,127 +205,135 @@ extern "C" {
 }
 
 #[component]
-pub fn Chat(
-    config: ReadSignal<Config>,
-    menu: ReadSignal<Menu>,
-    set_menu: WriteSignal<Menu>
+fn BottomButtons(
+    config: RwSignal<Config>,
+    menu: RwSignal<Menu>,
+    error: RwSignal<String>,
+    exchanges: RwSignal<Vec<(usize, RwSignal<Exchange>)>>,
+    new_exchange: RwSignal<Exchange>,
+    prompt: RwSignal<String>,
+    streaming: RwSignal<bool>,
 ) -> impl IntoView {
-    let (error, set_error) = create_signal("".to_string());
     let counter = create_rw_signal(0);
-    let (conversation_uuid, set_conversation_uuid) = create_signal(None::<uuid::Uuid>);
-    let (exchanges, set_exchanges) = create_signal(Vec::<(usize, RwSignal<Exchange>)>::new());
-    let (new_exchange, set_new_exchange) = create_signal(Exchange::default());
-    let (prompt, set_prompt) = create_signal("".to_string());
-    let (streaming, set_streaming) = create_signal(false);
+
+    let on_new = move || {
+        counter.set(0);
+        exchanges.set(Vec::new());
+    };
+
+    let on_submit = move || {
+        streaming.set(true);
+        error.set("".to_string());
+        let _prompt = prompt();
+        prompt.set("".to_string());
+        let _exchanges = exchanges.get_untracked()
+            .iter()
+            .map(|(_, exchange)| exchange.get_untracked())
+            .collect::<Vec<_>>();
+
+        new_exchange.set(Exchange {
+            user_message: _prompt.clone(),
+            assistant_message: "".to_string()
+        });
+
+        spawn_local(async move {
+            match build_token_stream(&_prompt, config.get_untracked(), _exchanges).await {
+                Ok(token_stream) => collect_tokens(token_stream, new_exchange, error).await,
+                Err(err) => error.set(err.to_string())
+            }
+
+            let _new_exchange = new_exchange.get_untracked();
+            if !_new_exchange.assistant_message.is_empty() {     // whether canceled before response
+                exchanges.update(|exchanges|
+                    exchanges.push((counter.get_untracked(), create_rw_signal(_new_exchange))));
+                counter.update(|counter| *counter += 1);
+                new_exchange.set(Exchange::default());
+            } else {
+                prompt.set(_prompt);
+            }
+
+            streaming.set(false);
+        });
+    };
+
+    let on_cancel = move || spawn_local(async move {
+        if let Err(_) = emit("cancel", JsValue::null()).await {
+            error.set("Unable to cancel stream.".into());
+        }
+    });
+
+    view! {
+        <Button class="mr-4 md:mr-8" label="New"
+            to_hide=streaming.into() on_click=Box::new(on_new) />
+        <Button class="" label="Submit"
+            to_hide=streaming.into() on_click=Box::new(on_submit) />
+        <div class="flex ml-auto">
+            <Button class="mr-4 md:mr-8" label="Cancel"
+                to_hide=Signal::derive(move || !streaming()) on_click=Box::new(on_cancel) />
+            <Button class="" label="Menu"
+                to_hide=create_signal(false).0.into()
+                on_click=Box::new(move || menu.set(Menu::Menu)) />
+        </div>
+    }
+}
+
+#[component]
+pub fn Chat(
+    config: RwSignal<Config>,
+    menu: RwSignal<Menu>
+) -> impl IntoView {
+    let error = create_rw_signal("".to_string());
+    let conversation_uuid = create_rw_signal(None::<uuid::Uuid>);
+    let exchanges = create_rw_signal(Vec::<(usize, RwSignal<Exchange>)>::new());
+    let new_exchange = create_rw_signal(Exchange::default());
+    let prompt = create_rw_signal("".to_string());
+    let streaming = create_rw_signal(false);
 
     create_effect(move |_| {
         let exchanges = exchanges().into_iter()
             .map(|(key, exchange)| (key, exchange.get_untracked()))
             .collect::<Vec<_>>();
         spawn_local(async move {
-            if let Some(conversation_uuid) = conversation_uuid.get_untracked() {
-                match crate::commands::set_exchanges(conversation_uuid, exchanges).await {
+            if let Some(uuid) = conversation_uuid.get_untracked() {
+                match crate::commands::set_exchanges(uuid, exchanges).await {
                     // if a different window deletes the current conversation
                     // a new one is created with a new uuid
-                    Ok(Some(uuid)) => set_conversation_uuid(Some(uuid)),
+                    Ok(Some(uuid)) => conversation_uuid.set(Some(uuid)),
                     // error saving exchanges
-                    Err(error) => set_error(error.to_string()),
+                    Err(err) => error.set(err.to_string()),
                     // exchanges were successfully saved to conversation
                     _ => ()
                 }
             } else {
                 match add_conversation(exchanges).await {
-                    Ok(uuid) => set_conversation_uuid(Some(uuid)),
-                    Err(error) => set_error(error.to_string()),
+                    Ok(uuid) => conversation_uuid.set(Some(uuid)),
+                    Err(err) => error.set(err.to_string()),
                 }
             }
         });
     });
 
-    let on_new = move || {
-        counter.set(0);
-        set_exchanges(Vec::new());
-    };
-
-    let on_submit = move || {
-        set_streaming(true);
-        set_error("".to_string());
-        let prompt = prompt();
-        set_prompt("".to_string());
-        let exchanges = exchanges.get_untracked()
-            .iter()
-            .map(|(_, exchange)| exchange.get_untracked())
-            .collect::<Vec<_>>();
-
-        set_new_exchange(Exchange {
-            user_message: prompt.clone(),
-            assistant_message: "".to_string()
-        });
-
-        spawn_local(async move {
-            match build_token_stream(&prompt, config.get_untracked(), exchanges).await {
-                Ok(token_stream) => collect_tokens(token_stream, set_new_exchange, set_error).await,
-                Err(error) => set_error(error.to_string())
-            }
-
-            let new_exchange = new_exchange.get_untracked();
-            if !new_exchange.assistant_message.is_empty() {     // whether canceled before response
-                set_exchanges.update(|exchanges|
-                    exchanges.push((counter.get_untracked(), create_rw_signal(new_exchange))));
-                counter.update(|counter| *counter += 1);
-                set_new_exchange(Exchange::default());
-            } else {
-                set_prompt(prompt);
-            }
-
-            set_streaming(false);
-        });
-    };
-
-    let on_cancel = move || spawn_local(async move {
-        if let Err(_) = emit("cancel", JsValue::null()).await {
-            set_error("Unable to cancel stream.".into());
-        }
-    });
+    let bottom_if_not_empty = move |classes: &str|
+        format!("{} {}", classes, (exchanges().is_empty() && !streaming()).then(|| "mb-auto")
+            .unwrap_or("mt-auto mb-4 md:mb-8"));
 
     view! {
         <div class="flex flex-col md:w-[80vw] md:mx-auto h-full p-4 md:py-[5vh] overflow-y-hidden"
                 style:display=move || (menu.get() != Menu::Chat).then(|| "None")>
             <h1 class="hidden md:block mb-6 text-[2em] font-serif">"LLM Playground"</h1>
             <ErrorMessage error />
-            <div class="mb-4 md:mx-[15vw] overflow-y-auto"
-                    style:display=move || (exchanges().is_empty() && !streaming()).then(|| "None")>
-                <Exchanges exchanges set_exchanges />
-                <p class="px-2 py-1 min-h-[2em] bg-[#222222] border-2 border-[#303038] text-[0.9em]"
-                    style:margin-top=move || (!exchanges().is_empty()).then(|| "12px")
-                    style:display=move || (!streaming()).then(|| "None")
-                >{move || new_exchange().user_message}</p>
-                <p class="mt-[12px] px-2 py-1 min-h-[2em] bg-[#222222] border-2 border-[#303038] text-[0.9em]"
-                    style:display=move || (!streaming()).then(|| "None")
-                >{move || new_exchange().assistant_message}</p>        
+            <div class="mb-4 md:mx-[15vw] overflow-y-auto">
+                <Exchanges new_exchange exchanges streaming/>
             </div>
-            <div class=move || format!("flex-none {} md:mx-[14.5vw] max-h-[50vh] overflow-y-auto",
-                    (exchanges().is_empty() && !streaming())
-                        .then(|| "mb-auto")
-                        .unwrap_or("mt-auto mb-4 md:mb-8"))>
+            <div class=move || bottom_if_not_empty("flex-none md:mx-[14.5vw] max-h-[50vh] overflow-y-auto")>
                 <div class="flex flex-col">     // scrolling breaks without this useless div
                     <MessageBox id="prompt-box".into() rows=2 class="".into()
                         placeholder=Some("Enter a prompt here.".into())
-                        content=prompt.into() set_content=set_prompt.into() />
+                        content=prompt.into() set_content=prompt.into() />
                 </div>
             </div>
             <div class="flex-none md:mx-[10vw] flex md:mx-8">
-                <Button class="mr-4 md:mr-8" label="New"
-                    to_hide=streaming.into() on_click=Box::new(on_new) />
-                <Button class="" label="Submit"
-                    to_hide=streaming.into() on_click=Box::new(on_submit) />
-                <div class="flex ml-auto">
-                    <Button class="mr-4 md:mr-8" label="Cancel"
-                        to_hide=Signal::derive(move || !streaming()) on_click=Box::new(on_cancel) />
-                    <Button class="" label="Menu"
-                        to_hide=create_signal(false).0.into()
-                        on_click=Box::new(move || set_menu(Menu::Menu)) />
-                </div>
+                <BottomButtons config menu error exchanges new_exchange prompt streaming/>
             </div>
         </div>
     }

@@ -1,35 +1,30 @@
 use common::Conversation;
 use leptos::*;
 use wasm_bindgen::prelude::*;
-use crate::{commands::load_conversations, util::{listen, Button, ErrorMessage, Menu}};
+use crate::util::{listen, Button, ErrorMessage, Menu};
+
+async fn load_conversations(conversations: RwSignal<Vec<RwSignal<Conversation>>>, error: RwSignal<String>) {
+    match crate::commands::load_conversations().await {
+        Ok(_conversations) => {
+            conversations.set(_conversations.into_iter().map(RwSignal::new).collect())
+        },
+        Err(err) => error.set(err.to_string())
+    }
+}
 
 #[component]
-pub fn History(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoView {
-    let (error, set_error) = create_signal("".to_string());
-    let (conversations, set_conversations) = create_signal(Vec::<RwSignal<Conversation>>::new());
+pub fn History(menu: RwSignal<Menu>) -> impl IntoView {
+    let error = create_rw_signal("".to_string());
+    let conversations = create_rw_signal(Vec::<RwSignal<Conversation>>::new());
 
-    spawn_local(async move {
-        match load_conversations().await {
-            Ok(conversations) => {
-                set_conversations(conversations
-                    .into_iter().map(RwSignal::new).collect())
-            },
-            Err(error) => set_error(error.to_string())
-        }
-    });
+    spawn_local(load_conversations(conversations, error));
 
     spawn_local(async move {
         // listen for when the user/another window/this window changes the conversation history
-        let on_update = Closure::new(move |_| spawn_local(async move {
-            match load_conversations().await {
-                Ok(conversations) => set_conversations(conversations
-                    .into_iter().map(RwSignal::new).collect()),
-                Err(error) => set_error(error.to_string())
-            }
-        }));
+        let on_update = Closure::new(move |_| spawn_local(load_conversations(conversations, error)));
 
         if let Err(_) = listen("conversations_updated", &on_update).await {
-            set_error("Error listening for conversation history updates".into());
+            error.set("Error listening for conversation history updates".into());
         }
 
         // keep on_update alive forever
@@ -47,7 +42,7 @@ pub fn History(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl Into
                     h-full p-4 md:p-[5vh] overflow-y-hidden text-[0.9em]"
                 style:display=move || (menu.get() != Menu::History).then(|| "None")>
             <Button class="mr-auto" label="Back" to_hide
-                on_click=Box::new(move || set_menu(Menu::Menu)) />
+                on_click=Box::new(move || menu.set(Menu::Menu)) />
             <h1 class="text-[1.25em]">"History"</h1>
             <div class="w-full mt-2"><ErrorMessage error /></div>
             <div class="grid grid-cols-[repeat(3,max-content)] gap-[5vh] px-[5vw] w-full

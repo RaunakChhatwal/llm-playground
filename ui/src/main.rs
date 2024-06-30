@@ -11,7 +11,7 @@ mod history;
 mod settings;
 
 #[component]
-pub fn Menu(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoView {
+pub fn Menu(menu: RwSignal<Menu>) -> impl IntoView {
     let to_hide = create_signal(false).0.into();
     view! {
         <div class="relative flex flex-col h-full"
@@ -21,11 +21,11 @@ pub fn Menu(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoVie
             <div class="grid grid-cols-[50vw] md:grid-cols-[25vw] gap-12 md:gap-16
                 justify-center items-center my-auto">
                 <Button class="md:py-[6px]" label="Chat" to_hide
-                    on_click=Box::new(move || set_menu(Menu::Chat)) />
+                    on_click=Box::new(move || menu.set(Menu::Chat)) />
                 <Button class="md:py-[6px]" label="History" to_hide
-                    on_click=Box::new(move || set_menu(Menu::History)) />
+                    on_click=Box::new(move || menu.set(Menu::History)) />
                 <Button class="md:py-[6px]" label="Settings" to_hide
-                    on_click=Box::new(move || set_menu(Menu::Settings)) />
+                    on_click=Box::new(move || menu.set(Menu::Settings)) />
             </div>
         </div>
     }
@@ -33,14 +33,14 @@ pub fn Menu(menu: ReadSignal<Menu>, set_menu: WriteSignal<Menu>) -> impl IntoVie
 
 #[component]
 fn App() -> impl IntoView {
-    let (menu, set_menu) = create_signal(Menu::Chat);
-    let (config, set_config) = create_signal(common::Config::default());
+    let menu = create_rw_signal(Menu::Chat);
+    let config = create_rw_signal(common::Config::default());
 
     view! {
-        <Chat config menu set_menu />
-        <Menu menu set_menu />
-        <History menu set_menu />
-        <Settings active_config=config set_active_config=set_config menu set_menu />
+        <Chat config menu />
+        <Menu menu />
+        <History menu />
+        <Settings active_config=config menu />
     }
 }
 

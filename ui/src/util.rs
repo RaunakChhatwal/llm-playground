@@ -10,7 +10,7 @@ pub enum Menu {
 }
 
 #[component]
-pub fn ErrorMessage(error: ReadSignal<String>) -> impl IntoView {
+pub fn ErrorMessage(error: RwSignal<String>) -> impl IntoView {
     view! {
         <p class="mb-2 text-red-400 text-[0.9em]"
             style:display=move || error().is_empty().then(|| "None")
