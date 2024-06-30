@@ -1,5 +1,5 @@
 use anyhow::Result;
-use common::{Config, Exchange};
+use common::{Config, Conversation, Exchange};
 
 #[macros::command]
 pub async fn add_conversation(exchanges: Vec<(usize, Exchange)>) -> Result<uuid::Uuid> {}
@@ -13,6 +13,9 @@ pub async fn build_token_stream(
 
 #[macros::command]
 pub async fn load_config() -> Result<Config> {}
+
+#[macros::command]
+pub async fn load_conversations() -> Result<Vec<Conversation>> {}
 
 #[macros::command]
 pub async fn save_config(config: Config) -> Result<()> {}

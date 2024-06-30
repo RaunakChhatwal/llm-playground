@@ -84,7 +84,7 @@ async fn _load_conversations() -> Result<Vec<Conversation>> {
     return Ok(conversations.into_iter()
         .filter_map(|(conversation, exchange)| Some(Conversation {
             uuid: uuid::Uuid::from_slice(&conversation.uuid).ok()?,
-            time: chrono::DateTime::from_timestamp(conversation.last_updated, 0)?,
+            last_updated: chrono::DateTime::from_timestamp(conversation.last_updated, 0)?,
             title: exchange?.user_message,
         }))
         .collect());

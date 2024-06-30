@@ -55,6 +55,6 @@ pub struct Exchange {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Conversation {
     pub uuid: uuid::Uuid,
-    pub time: chrono::DateTime<chrono::Utc>,
+    pub last_updated: chrono::DateTime<chrono::Utc>,
     pub title: String
 }

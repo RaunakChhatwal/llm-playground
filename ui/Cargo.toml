@@ -24,3 +24,4 @@ common = { path = "../common" }
 macros = { path = "./macros" }
 serde-error = "0.1.2"
 uuid = "1.9.1"
+chrono = "0.4.38"
