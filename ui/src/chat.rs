@@ -107,24 +107,22 @@ fn Exchanges(
     streaming: RwSignal<bool>
 ) -> impl IntoView {
     view! {
-        <div style:display=move || (exchanges().is_empty() && !streaming()).then(|| "None")>
-            <div class="flex flex-col">
-                <For each=exchanges
-                    key=|exchange| exchange.0
-                    children=move |(id, exchange)| view! {
-                        <div style:margin-top=move || (id != exchanges()[0].0).then(|| "12px")>
-                            <ExchangeComponent id exchange exchanges />
-                        </div>
-                    } />
-            </div>
-            <p class="px-2 py-1 min-h-[2em] bg-[#222222] border-2 border-[#303038] text-[0.9em]"
-                style:margin-top=move || (!exchanges().is_empty()).then(|| "12px")
-                style:display=move || (!streaming()).then(|| "None")
-            >{move || new_exchange().user_message}</p>
-            <p class="mt-[12px] px-2 py-1 min-h-[2em] bg-[#222222] border-2 border-[#303038] text-[0.9em]"
-                style:display=move || (!streaming()).then(|| "None")
-            >{move || new_exchange().assistant_message}</p>
+        <div class="flex flex-col">
+            <For each=exchanges
+                key=|exchange| exchange.0
+                children=move |(id, exchange)| view! {
+                    <div style:margin-top=move || (id != exchanges()[0].0).then(|| "12px")>
+                        <ExchangeComponent id exchange exchanges />
+                    </div>
+                } />
         </div>
+        <p class="px-2 py-1 min-h-[2em] bg-[#222222] border-2 border-[#303038] text-[0.9em]"
+            style:margin-top=move || (!exchanges().is_empty()).then(|| "12px")
+            style:display=move || (!streaming()).then(|| "None")
+        >{move || new_exchange().user_message}</p>
+        <p class="mt-[12px] px-2 py-1 min-h-[2em] bg-[#222222] border-2 border-[#303038] text-[0.9em]"
+            style:display=move || (!streaming()).then(|| "None")
+        >{move || new_exchange().assistant_message}</p>
     }
 }
 
@@ -214,13 +212,6 @@ fn BottomButtons(
     prompt: RwSignal<String>,
     streaming: RwSignal<bool>,
 ) -> impl IntoView {
-    let counter = create_rw_signal(0);
-
-    let on_new = move || {
-        counter.set(0);
-        exchanges.set(Vec::new());
-    };
-
     let on_submit = move || {
         streaming.set(true);
         error.set("".to_string());
@@ -243,13 +234,14 @@ fn BottomButtons(
             }
 
             let _new_exchange = new_exchange.get_untracked();
-            if !_new_exchange.assistant_message.is_empty() {     // whether canceled before response
-                exchanges.update(|exchanges|
-                    exchanges.push((counter.get_untracked(), create_rw_signal(_new_exchange))));
-                counter.update(|counter| *counter += 1);
-                new_exchange.set(Exchange::default());
-            } else {
+            if _new_exchange.assistant_message.is_empty() {     // whether canceled before response
                 prompt.set(_prompt);
+            } else {
+                exchanges.update(|exchanges| {
+                    let max_key = exchanges.into_iter().map(|(key, _)| *key + 1).max().unwrap_or(0);
+                    exchanges.push((max_key, create_rw_signal(_new_exchange)));
+                });
+                new_exchange.set(Exchange::default());
             }
 
             streaming.set(false);
@@ -264,7 +256,7 @@ fn BottomButtons(
 
     view! {
         <Button class="mr-4 md:mr-8" label="New"
-            to_hide=streaming.into() on_click=Box::new(on_new) />
+            to_hide=streaming.into() on_click=Box::new(move || exchanges.set(vec![])) />
         <Button class="" label="Submit"
             to_hide=streaming.into() on_click=Box::new(on_submit) />
         <div class="flex ml-auto">
@@ -279,11 +271,11 @@ fn BottomButtons(
 
 #[component]
 pub fn Chat(
+    conversation_uuid: RwSignal<Option<uuid::Uuid>>,
     config: RwSignal<Config>,
     menu: RwSignal<Menu>
 ) -> impl IntoView {
     let error = create_rw_signal("".to_string());
-    let conversation_uuid = create_rw_signal(None::<uuid::Uuid>);
     let exchanges = create_rw_signal(Vec::<(usize, RwSignal<Exchange>)>::new());
     let new_exchange = create_rw_signal(Exchange::default());
     let prompt = create_rw_signal("".to_string());
@@ -294,6 +286,14 @@ pub fn Chat(
             .map(|(key, exchange)| (key, exchange.get_untracked()))
             .collect::<Vec<_>>();
         spawn_local(async move {
+            if exchanges.is_empty() {
+                if !conversation_uuid.get_untracked().is_none() {
+                    // the foreign key constraint should forbid an empty conversation
+                    // so this code should be unreachable
+                    conversation_uuid.set(None);
+                }
+                return;
+            }
             if let Some(uuid) = conversation_uuid.get_untracked() {
                 match crate::commands::set_exchanges(uuid, exchanges).await {
                     // if a different window deletes the current conversation
@@ -322,7 +322,8 @@ pub fn Chat(
                 style:display=move || (menu.get() != Menu::Chat).then(|| "None")>
             <h1 class="hidden md:block mb-6 text-[2em] font-serif">"LLM Playground"</h1>
             <ErrorMessage error />
-            <div class="mb-4 md:mx-[15vw] overflow-y-auto">
+            <div class="mb-4 md:mx-[15vw] overflow-y-auto"
+                    style:display=move || (exchanges().is_empty() && !streaming()).then(|| "None")>
                 <Exchanges new_exchange exchanges streaming/>
             </div>
             <div class=move || bottom_if_not_empty("flex-none md:mx-[14.5vw] max-h-[50vh] overflow-y-auto")>
@@ -333,7 +334,7 @@ pub fn Chat(
                 </div>
             </div>
             <div class="flex-none md:mx-[10vw] flex md:mx-8">
-                <BottomButtons config menu error exchanges new_exchange prompt streaming/>
+                <BottomButtons config menu error exchanges new_exchange prompt streaming />
             </div>
         </div>
     }

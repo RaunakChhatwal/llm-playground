@@ -5,7 +5,7 @@ use std::{ops::Deref, path::Path};
 use anyhow::{anyhow, Context, Result};
 use common::{to_serde_err, Config, Conversation, Exchange};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use sea_orm::{ActiveModelTrait, ColumnTrait, Database, EntityTrait, QueryFilter, Set, TransactionTrait};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Database, EntityTrait, QueryFilter, QueryOrder, Set, TransactionTrait};
 use serde_error::Error;
 use tauri::Manager;
 use fetch_tokens::build_token_stream;
@@ -58,7 +58,7 @@ async fn save_config(config: Config) -> Result<(), Error> {
 }
 
 // the database connection to <config-dir>/conversations.db
-// I chose sqlite over json for consistency
+// I chose sqlite over json for data consistency
 lazy_static::lazy_static! {
     static ref CONN: Result<sea_orm::DatabaseConnection> = futures::executor::block_on(async {
         let db_path = config_dir().await?
@@ -74,20 +74,19 @@ lazy_static::lazy_static! {
 
 async fn _load_conversations() -> Result<Vec<Conversation>> {
     let conn = CONN.as_ref().map_err(Deref::deref)?;
-    let conversations: Vec<(
-        entity::conversations::Model,
-        Option<entity::exchanges::Model>
-    )> = entity::conversations::Entity::find()
+    let conversations = entity::conversations::Entity::find()
         .find_also_related(entity::exchanges::Entity)
-        .all(conn).await?;
-
-    return Ok(conversations.into_iter()
+        .order_by_desc(entity::conversations::Column::LastUpdated)
+        .all(conn).await?
+        .into_iter()
         .filter_map(|(conversation, exchange)| Some(Conversation {
             uuid: uuid::Uuid::from_slice(&conversation.uuid).ok()?,
             last_updated: chrono::DateTime::from_timestamp(conversation.last_updated, 0)?,
             title: exchange?.user_message,
         }))
-        .collect());
+        .collect();
+
+    return Ok(conversations);
 }
 
 #[tauri::command]
@@ -124,6 +123,8 @@ async fn _add_conversation(mut exchanges: Vec<(usize, Exchange)>) -> Result<uuid
         key: Set(first_exchange_key.try_into()?),
         user_message: Set(first_exchange.user_message),
         assistant_message: Set(first_exchange.assistant_message),
+        // the foreign key constraint is deferred until transaction is committed
+        // so this is okay as long as it's changed later
         conversation: Set(-1),
         ..Default::default()
     }.insert(&txn).await?;
@@ -138,7 +139,7 @@ async fn _add_conversation(mut exchanges: Vec<(usize, Exchange)>) -> Result<uuid
 
     add_exchanges(conversation.id, exchanges, &txn).await?;
     let mut first_exchange = entity::exchanges::ActiveModel::from(first_exchange);
-    first_exchange.conversation = Set(conversation.id);
+    first_exchange.conversation = Set(conversation.id);     // fixed first_exchange foreign key
     first_exchange.update(&txn).await?;
 
     txn.commit().await?;
@@ -151,6 +152,60 @@ async fn add_conversation(exchanges: Vec<(usize, Exchange)>) -> Result<uuid::Uui
     _add_conversation(exchanges).await.map_err(to_serde_err)
 }
 
+async fn _delete_conversation(conversation_uuid: uuid::Uuid) -> Result<()> {
+    let txn = CONN.as_ref().map_err(Deref::deref)?.begin().await?;
+
+    let conversation = entity::conversations::Entity::find()
+        .filter(entity::conversations::Column::Uuid.eq(conversation_uuid))
+        .one(&txn).await?
+        .ok_or(anyhow!("Conversation with uuid {} not found", conversation_uuid))?;
+
+    // remove exchanges from database
+    entity::exchanges::Entity::delete_many()
+        .filter(entity::exchanges::Column::Conversation.eq(conversation.id))
+        .exec(&txn).await?;
+
+    entity::conversations::ActiveModel::from(conversation).delete(&txn).await?;
+
+    txn.commit().await?;
+
+    return Ok(());
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn delete_conversation(conversation_uuid: uuid::Uuid) -> Result<(), Error> {
+    _delete_conversation(conversation_uuid).await.map_err(to_serde_err)
+}
+
+async fn _load_exchanges(conversation_uuid: uuid::Uuid) -> Result<Vec<(usize, Exchange)>> {
+    let conn = CONN.as_ref().map_err(Deref::deref)?;
+
+    // find the conversation
+    let conversation = entity::conversations::Entity::find()
+        .filter(entity::conversations::Column::Uuid.eq(conversation_uuid))
+        .one(conn).await?
+        .ok_or(anyhow!("Conversation with uuid {} not found", conversation_uuid))?;
+
+    // load all exchanges in the conversation
+    let exchanges = entity::exchanges::Entity::find()
+        .filter(entity::exchanges::Column::Conversation.eq(conversation.id))
+        .order_by_asc(entity::exchanges::Column::Key)
+        .all(conn).await?
+        .into_iter()
+        .map(|exchange| (exchange.key as usize, Exchange {
+            user_message: exchange.user_message,
+            assistant_message: exchange.assistant_message,
+        }))
+        .collect();
+
+    return Ok(exchanges);
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn load_exchanges(conversation_uuid: uuid::Uuid) -> Result<Vec<(usize, Exchange)>, Error> {
+    _load_exchanges(conversation_uuid).await.map_err(to_serde_err)
+}
+
 async fn _set_exchanges(
     conversation_uuid: uuid::Uuid,
     exchanges: Vec<(usize, Exchange)>
@@ -161,6 +216,7 @@ async fn _set_exchanges(
         .filter(entity::conversations::Column::Uuid.eq(conversation_uuid))
         .one(&txn).await?;
     let Some(conversation) = conversation else {
+        txn.rollback().await?;
         return Ok(Some(_add_conversation(exchanges).await?));
     };
 
@@ -242,8 +298,10 @@ async fn main() -> Result<()> {
         .invoke_handler(tauri::generate_handler![
             add_conversation,
             build_token_stream,
+            delete_conversation,
             load_config,
             load_conversations,
+            load_exchanges,
             save_config,
             set_exchanges
         ])

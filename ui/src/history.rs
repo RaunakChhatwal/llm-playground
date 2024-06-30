@@ -1,7 +1,7 @@
 use common::Conversation;
 use leptos::*;
 use wasm_bindgen::prelude::*;
-use crate::util::{listen, Button, ErrorMessage, Menu};
+use crate::{commands::delete_conversation, util::{listen, Button, ErrorMessage, Menu}};
 
 async fn load_conversations(conversations: RwSignal<Vec<RwSignal<Conversation>>>, error: RwSignal<String>) {
     match crate::commands::load_conversations().await {
@@ -31,6 +31,12 @@ pub fn History(menu: RwSignal<Menu>) -> impl IntoView {
         std::mem::forget(on_update);
     });
 
+    let on_delete = move |conversation_uuid| spawn_local(async move {
+        if let Err(err) = delete_conversation(conversation_uuid).await {
+            error.set(err.to_string());
+        }
+    });
+
     let local_formatted_time = |conversation: Conversation| conversation.last_updated
         .with_timezone(&chrono::Local)
         .format("%m-%d-%Y")
@@ -51,9 +57,12 @@ pub fn History(menu: RwSignal<Menu>) -> impl IntoView {
                     key=|conversation| conversation.get_untracked().uuid
                     children=move |conversation| view! {
                         <p class="text-[0.9em]">{local_formatted_time(conversation())}</p>
-                        <a class="truncate max-w-[45vw] text-blue-600" href
-                        >{conversation().title}</a>
-                        <a class="text-blue-600" href>"delete"</a>
+                        <a class="truncate max-w-[45vw] text-blue-600 cursor-pointer">
+                            {conversation().title}
+                        </a>
+                        <a class="text-blue-600 cursor-pointer"
+                            on:click=move |_| on_delete(conversation.get_untracked().uuid)
+                        >"delete"</a>
                     } />
             </div>
         </div>

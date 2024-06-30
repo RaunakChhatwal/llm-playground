@@ -12,10 +12,16 @@ pub async fn build_token_stream(
 ) -> Result<()> {}
 
 #[macros::command]
+pub async fn delete_conversation(conversation_uuid: uuid::Uuid) -> Result<()> {}
+
+#[macros::command]
 pub async fn load_config() -> Result<Config> {}
 
 #[macros::command]
 pub async fn load_conversations() -> Result<Vec<Conversation>> {}
+
+#[macros::command]
+pub async fn load_exchanges(conversation_uuid: uuid::Uuid) -> Result<Vec<(usize, Exchange)>> {}
 
 #[macros::command]
 pub async fn save_config(config: Config) -> Result<()> {}
