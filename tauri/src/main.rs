@@ -2,10 +2,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{ops::Deref, path::Path};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use common::{to_serde_err, Config, Conversation, Exchange};
+use migration::{Migrator, MigratorTrait};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use sea_orm::{ActiveModelTrait, ColumnTrait, Database, EntityTrait, QueryFilter, QueryOrder, Set, TransactionTrait};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Database, EntityTrait, IntoActiveModel, QueryFilter,
+    QueryOrder, Set, TransactionTrait};
 use serde_error::Error;
 use tauri::Manager;
 use fetch_tokens::build_token_stream;
@@ -67,8 +69,7 @@ lazy_static::lazy_static! {
             .map(str::to_string)
             .ok_or(anyhow!("Unable to connect to database."))?;
 
-        Database::connect(&format!("sqlite://{}", db_path)).await
-            .map_err(Into::into)
+        Database::connect(&format!("sqlite://{}?mode=rwc", db_path)).await.map_err(Into::into)
     });
 }
 
@@ -91,9 +92,7 @@ async fn _load_conversations() -> Result<Vec<Conversation>> {
 
 #[tauri::command]
 async fn load_conversations() -> Result<Vec<Conversation>, Error> {
-    _load_conversations().await
-        .context("Unable to load conversations")
-        .map_err(to_serde_err)
+    _load_conversations().await.map_err(to_serde_err)
 }
 
 async fn add_exchanges(
@@ -116,7 +115,7 @@ async fn _add_conversation(mut exchanges: Vec<(usize, Exchange)>) -> Result<uuid
     let txn = CONN.as_ref().map_err(Deref::deref)?.begin().await?;
 
     if exchanges.is_empty() {
-        anyhow::bail!("Conversation cannot be set empty.");
+        bail!("Conversation cannot be set empty.");
     }
     let (first_exchange_key, first_exchange) = exchanges.remove(0);
     let first_exchange = entity::exchanges::ActiveModel {
@@ -158,14 +157,10 @@ async fn _delete_conversation(conversation_uuid: uuid::Uuid) -> Result<()> {
     let conversation = entity::conversations::Entity::find()
         .filter(entity::conversations::Column::Uuid.eq(conversation_uuid))
         .one(&txn).await?
+        .map(entity::conversations::Model::into_active_model)
         .ok_or(anyhow!("Conversation with uuid {} not found", conversation_uuid))?;
 
-    // remove exchanges from database
-    entity::exchanges::Entity::delete_many()
-        .filter(entity::exchanges::Column::Conversation.eq(conversation.id))
-        .exec(&txn).await?;
-
-    entity::conversations::ActiveModel::from(conversation).delete(&txn).await?;
+    entity::conversations::Entity::delete(conversation).exec(&txn).await?;
 
     txn.commit().await?;
 
@@ -220,10 +215,9 @@ async fn _set_exchanges(
         return Ok(Some(_add_conversation(exchanges).await?));
     };
 
-    // remove exchanges from database
-    entity::exchanges::Entity::delete_many()
+    let old_exchanges = entity::exchanges::Entity::find()
         .filter(entity::exchanges::Column::Conversation.eq(conversation.id))
-        .exec(&txn).await?;
+        .all(&txn).await?;
 
     let exchanges = add_exchanges(conversation.id, exchanges, &txn).await?;
     let first_exchange = exchanges.get(0).ok_or(anyhow!("Conversation cannot be set empty."))?;
@@ -232,6 +226,12 @@ async fn _set_exchanges(
     conversation.first_exchange = Set(first_exchange.id);
     conversation.last_updated = Set(chrono::Utc::now().timestamp());
     conversation.update(&txn).await?;
+
+    futures::future::join_all(old_exchanges.into_iter()
+        .map(entity::exchanges::ActiveModel::from)
+        .map(|exchange|
+            entity::exchanges::Entity::delete(exchange).exec(&txn))
+    ).await.into_iter().collect::<Result<Vec<_>, _>>()?;
 
     txn.commit().await?;
 
@@ -285,6 +285,9 @@ fn watch_file(app: tauri::AppHandle, event_name: &'static str, file: &Path) -> R
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let conn = CONN.as_ref().map_err(Deref::deref)?;
+    Migrator::up(conn, None).await?;
+
     tauri::Builder::default()
         .setup(|app| {
             let app = app.handle();

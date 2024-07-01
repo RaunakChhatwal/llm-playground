@@ -1,3 +1,3 @@
 [workspace]
-members = ["common", "ui", "ui/macros", "tauri", "tauri/entity"]
+members = ["common", "migration", "tauri", "tauri/entity", "ui", "ui/macros"]
 resolver = "2"
