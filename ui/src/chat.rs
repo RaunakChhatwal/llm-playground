@@ -61,7 +61,7 @@ fn MessageBox(
         }
     });
 
-    let class = format!("{} flex-none w-full min-h-[2em] px-2 pt-1 pb-2 border-2 border-[#303038]
+    let class = format!("{} flex-none w-full min-h-[2em] px-2 pt-1 pb-2 border border-[#303038]
         bg-[#222222] text-[0.9em] overflow-hidden resize-none", class);
     view! {
         <textarea id=id rows=rows class=class type="text"
@@ -133,11 +133,11 @@ fn Exchanges(
                     </div>
                 } />
         </div>
-        <p class="px-2 py-1 min-h-[2em] bg-[#222222] border-2 border-[#303038] text-[0.9em]"
+        <p class="px-2 py-1 min-h-[2em] bg-[#222222] border border-[#303038] text-[0.9em]"
             style:margin-top=move || (!exchanges().is_empty()).then(|| "12px")
             style:display=move || (!streaming()).then(|| "None")
         >{move || new_exchange().user_message}</p>
-        <p class="mt-[12px] px-2 py-1 min-h-[2em] bg-[#222222] border-2 border-[#303038] text-[0.9em]"
+        <p class="mt-[12px] px-2 py-1 min-h-[2em] bg-[#222222] border border-[#303038] text-[0.9em]"
             style:display=move || (!streaming()).then(|| "None")
         >{move || new_exchange().assistant_message}</p>
     }

@@ -26,7 +26,7 @@ pub fn Button(
     on_click: Box<dyn Fn()>)
 -> impl IntoView {
     let class = format!("{class}
-        px-[9px] py-[3px] border-2 border-[#33333A] bg-[#222222] hover:bg-[#2A2A2A] text-[#AAAABB]");
+        px-[9px] py-[3px] border border-[#33333A] bg-[#222222] hover:bg-[#2A2A2A] text-[#AAAABB]");
 
     view! {
         <button

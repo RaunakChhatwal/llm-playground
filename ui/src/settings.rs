@@ -102,7 +102,7 @@ fn ModelInput(config: RwSignal<Config>) -> impl IntoView {
     view! {
         <label>"Model:"</label>
         <input id="model-input" type="text" on:input=on_input
-            class="px-2 py-1 bg-[#222222] border-2 border-[#33333A] text-[0.9em]" />
+            class="px-2 py-1 bg-[#222222] border border-[#33333A] text-[0.9em]" />
     }
 }
 
@@ -127,7 +127,7 @@ fn KeyEntry(
         <input type="radio" value=api_key.name.clone() name="key_name"
             id=format!("key-name-{}", api_key.name.clone()) />
         <p class="mx-2">{api_key.name.clone()}</p>
-        <button class="px-[5px] w-[max-content] h-[max-content] border-2 border-[#33333A]
+        <button class="px-[5px] w-[max-content] h-[max-content] border border-[#33333A]
                 bg-[#222222] hover:bg-[#33333A] text-[#AAAABB]"
             on:click=move |_| on_remove(&api_key.name)
         >"-"</button>
@@ -163,13 +163,13 @@ fn KeyInput(new_key: RwSignal<Option<APIKey>>) -> impl IntoView {
             style:display=move || new_key().is_none().then(|| "None")
         >
             <label>"Name:"</label>
-            <input type="text" class="px-1 bg-[#222222] h-[2em] border-2 border-[#33333A] text-[0.9em]"
+            <input type="text" class="px-1 bg-[#222222] h-[2em] border border-[#33333A] text-[0.9em]"
                 on:input=move |event| new_key.update(|new_key| {
                     new_key.as_mut().map(|new_key|
                         new_key.name = event_target_value(&event));
                 }) />
             <label>"Key:"</label>
-            <input type="text" class="px-1 bg-[#222222] h-[2em] border-2 border-[#33333A] text-[0.9em]"
+            <input type="text" class="px-1 bg-[#222222] h-[2em] border border-[#33333A] text-[0.9em]"
                 on:input=move |event| new_key.update(|new_key| {
                     new_key.as_mut().map(|new_key|
                         new_key.key = event_target_value(&event));
@@ -242,7 +242,7 @@ fn KeyList(config: RwSignal<Config>) -> impl IntoView {
         }
     };
 
-    let button_classes = "px-[9px] py-[3px] w-[max-content] border-2 border-[#33333A]
+    let button_classes = "px-[9px] py-[3px] w-[max-content] border border-[#33333A]
         bg-[#222222] hover:bg-[#2A2A2A] text-[#AAAABB]";
     view! {
         <div class="col-span-2 grid grid-cols-1 gap-4">
