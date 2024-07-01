@@ -33,12 +33,14 @@ pub fn Menu(menu: RwSignal<Menu>) -> impl IntoView {
 
 #[component]
 fn App() -> impl IntoView {
-    let conversation_uuid = create_rw_signal(None::<uuid::Uuid>);
+    let conversation_uuid = create_rw_signal(None);
     let config = create_rw_signal(common::Config::default());
     let menu = create_rw_signal(Menu::Chat);
 
+    *crate::util::_conversation_uuid.write().unwrap() = conversation_uuid;
+
     view! {
-        <Chat conversation_uuid config menu />
+        <Chat config menu />
         <Menu menu />
         <History menu />
         <Settings active_config=config menu />

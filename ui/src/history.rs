@@ -1,39 +1,67 @@
 use common::Conversation;
 use leptos::*;
 use wasm_bindgen::prelude::*;
-use crate::{commands::delete_conversation, util::{listen, Button, ErrorMessage, Menu}};
+use crate::commands::delete_conversation;
+use crate::util::{listen, set_conversation_uuid, Button, ErrorMessage, Menu};
 
-async fn load_conversations(conversations: RwSignal<Vec<RwSignal<Conversation>>>, error: RwSignal<String>) {
-    match crate::commands::load_conversations().await {
-        Ok(_conversations) => {
-            conversations.set(_conversations.into_iter().map(RwSignal::new).collect())
-        },
-        Err(err) => error.set(err.to_string())
-    }
+lazy_static::lazy_static! {
+    // anyhow! macro doesn't work if there is a static variable named "error" in the namespace
+    pub static ref signal_pair: (ReadSignal<String>, WriteSignal<String>) = create_signal("".into());
+    pub static ref set_error: WriteSignal<String> = signal_pair.1;
+}
+
+async fn load_conversations(conversations: RwSignal<Vec<RwSignal<Conversation>>>) {
+    let new_conversations = match crate::commands::load_conversations().await {
+        Ok(conversations) => conversations,
+        Err(error) => {
+            set_error(error.to_string());
+            return;
+        }
+    };
+
+    let uuid_to_conversation = conversations.get_untracked()
+        .into_iter()
+        .map(|conversation| (conversation.get_untracked().uuid, conversation))
+        .collect::<std::collections::HashMap<_, _>>();
+
+    let synchronized_conversation = new_conversations.into_iter()
+        .map(|new_conversation| uuid_to_conversation.get(&new_conversation.uuid)
+            .map(|conversation|{
+                conversation.set(new_conversation.clone());
+                *conversation
+            })
+            .unwrap_or_else(|| create_rw_signal(new_conversation)))
+        .collect();
+    conversations.set(synchronized_conversation);
 }
 
 #[component]
 pub fn History(menu: RwSignal<Menu>) -> impl IntoView {
-    let error = create_rw_signal("".to_string());
+    let error = signal_pair.0;
     let conversations = create_rw_signal(Vec::<RwSignal<Conversation>>::new());
 
-    spawn_local(load_conversations(conversations, error));
+    spawn_local(load_conversations(conversations));
 
     spawn_local(async move {
         // listen for when the user/another window/this window changes the conversation history
-        let on_update = Closure::new(move |_| spawn_local(load_conversations(conversations, error)));
+        let on_update = Closure::new(move |_| spawn_local(load_conversations(conversations)));
 
         if let Err(_) = listen("conversations_updated", &on_update).await {
-            error.set("Error listening for conversation history updates".into());
+            set_error("Error listening for conversation history updates".into());
         }
 
         // keep on_update alive forever
         std::mem::forget(on_update);
     });
 
-    let on_delete = move |conversation_uuid| spawn_local(async move {
-        if let Err(err) = delete_conversation(conversation_uuid).await {
-            error.set(err.to_string());
+    let on_load = move |uuid| {
+        set_conversation_uuid(uuid);
+        menu.set(Menu::Chat);
+    };
+
+    let on_delete = move |uuid| spawn_local(async move {
+        if let Err(error) = delete_conversation(uuid).await {
+            set_error(error.to_string());
         }
     });
 
@@ -52,14 +80,14 @@ pub fn History(menu: RwSignal<Menu>) -> impl IntoView {
             <h1 class="text-[1.25em]">"History"</h1>
             <div class="w-full mt-2"><ErrorMessage error /></div>
             <div class="grid grid-cols-[repeat(3,max-content)] gap-[5vh] px-[5vw] w-full
-                    overflow-y-auto justify-center items-center h-[75%] my-auto">
+                    overflow-y-auto justify-center items-center my-[10vh]">
                 <For each=conversations
                     key=|conversation| conversation.get_untracked().uuid
                     children=move |conversation| view! {
                         <p class="text-[0.9em]">{local_formatted_time(conversation())}</p>
-                        <a class="truncate max-w-[45vw] text-blue-600 cursor-pointer">
-                            {conversation().title}
-                        </a>
+                        <a class="truncate w-[45vw] text-blue-600 cursor-pointer"
+                            on:click=move |_| on_load(Some(conversation.get_untracked().uuid))
+                        >{conversation().title}</a>
                         <a class="text-blue-600 cursor-pointer"
                             on:click=move |_| on_delete(conversation.get_untracked().uuid)
                         >"delete"</a>

@@ -2493,6 +2493,7 @@ dependencies = [
  "futures",
  "gloo-utils",
  "js-sys",
+ "lazy_static",
  "leptos",
  "macros",
  "serde",
