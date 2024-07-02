@@ -6,8 +6,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use common::{to_serde_err, Config, Conversation, Exchange};
 use migration::{Migrator, MigratorTrait};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use sea_orm::{ActiveModelTrait, ColumnTrait, Database, EntityTrait, IntoActiveModel, QueryFilter,
-    QueryOrder, Set, TransactionTrait};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Database, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder, Set};
 use serde_error::Error;
 use tauri::Manager;
 use fetch_tokens::build_token_stream;
@@ -73,6 +72,10 @@ lazy_static::lazy_static! {
     });
 }
 
+async fn initiate_transaction() -> Result<sea_orm::DatabaseTransaction> {
+    todo!()
+}
+
 async fn _load_conversations() -> Result<Vec<Conversation>> {
     let conn = CONN.as_ref().map_err(Deref::deref)?;
     let conversations = entity::conversations::Entity::find()
@@ -111,9 +114,10 @@ async fn add_exchanges(
     })).await.into_iter().collect::<Result<Vec<_>, _>>()
 }
 
-async fn _add_conversation(mut exchanges: Vec<(usize, Exchange)>) -> Result<uuid::Uuid> {
-    let txn = CONN.as_ref().map_err(Deref::deref)?.begin().await?;
-
+async fn _add_conversation(
+    mut exchanges: Vec<(usize, Exchange)>,
+    txn: sea_orm::DatabaseTransaction
+) -> Result<uuid::Uuid> {
     if exchanges.is_empty() {
         bail!("Conversation cannot be set empty.");
     }
@@ -148,11 +152,12 @@ async fn _add_conversation(mut exchanges: Vec<(usize, Exchange)>) -> Result<uuid
 
 #[tauri::command]
 async fn add_conversation(exchanges: Vec<(usize, Exchange)>) -> Result<uuid::Uuid, Error> {
-    _add_conversation(exchanges).await.map_err(to_serde_err)
+    let txn = initiate_transaction().await.map_err(to_serde_err)?;
+    _add_conversation(exchanges, txn).await.map_err(to_serde_err)
 }
 
 async fn _delete_conversation(conversation_uuid: uuid::Uuid) -> Result<()> {
-    let txn = CONN.as_ref().map_err(Deref::deref)?.begin().await?;
+    let txn = initiate_transaction().await?;
 
     let conversation = entity::conversations::Entity::find()
         .filter(entity::conversations::Column::Uuid.eq(conversation_uuid))
@@ -205,14 +210,13 @@ async fn _set_exchanges(
     conversation_uuid: uuid::Uuid,
     exchanges: Vec<(usize, Exchange)>
 ) -> Result<Option<uuid::Uuid>> {
-    let txn = CONN.as_ref().map_err(Deref::deref)?.begin().await?;
+    let txn = initiate_transaction().await?;
 
     let conversation = entity::conversations::Entity::find()
         .filter(entity::conversations::Column::Uuid.eq(conversation_uuid))
         .one(&txn).await?;
     let Some(conversation) = conversation else {
-        txn.rollback().await?;
-        return Ok(Some(_add_conversation(exchanges).await?));
+        return Ok(Some(_add_conversation(exchanges, txn).await?));
     };
 
     let old_exchanges = entity::exchanges::Entity::find()
