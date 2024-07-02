@@ -25,7 +25,7 @@ lazy_static = "1.4.0"
 strum_macros = "0.26.2"
 strum = "0.26.2"
 common = { path = "../common" }
-notify = "6.1.1"
+notify = { version = "6.1.1", features = ["macos_kqueue"] }
 serde-error = "0.1.2"
 sea-orm = { version = "0.12.15", features = ["sqlx-sqlite", "runtime-tokio-rustls"] }
 entity = { path = "./entity" }

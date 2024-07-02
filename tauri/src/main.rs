@@ -6,7 +6,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use common::{to_serde_err, Config, Conversation, Exchange};
 use migration::{Migrator, MigratorTrait};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use sea_orm::{ActiveModelTrait, ColumnTrait, Database, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Database, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
+    Set, TransactionTrait};
 use serde_error::Error;
 use tauri::Manager;
 use fetch_tokens::build_token_stream;
@@ -18,6 +19,7 @@ async fn config_dir() -> Result<std::path::PathBuf, Error> {
             .ok_or(to_serde_err(anyhow!("Unable to find the config directory")))?
             .join("llm-playground");
     if !Path::exists(&Path::new(&config_dir)) {
+        // create if doesn't exist
         tokio::fs::create_dir(&config_dir).await
             .context("Error creating config directory")
             .map_err(to_serde_err)?;
@@ -38,6 +40,7 @@ async fn load_config() -> Result<Config, Error> {
         },
         Err(error) => {
             if matches!(error.kind(), std::io::ErrorKind::NotFound) {
+                // create if doesn't exist
                 config = Config::default();
                 save_config(config.clone()).await?;
             } else {
@@ -73,7 +76,7 @@ lazy_static::lazy_static! {
 }
 
 async fn initiate_transaction() -> Result<sea_orm::DatabaseTransaction> {
-    todo!()
+    CONN.as_ref().map_err(Deref::deref)?.begin().await.map_err(Into::into)
 }
 
 async fn _load_conversations() -> Result<Vec<Conversation>> {
@@ -216,6 +219,8 @@ async fn _set_exchanges(
         .filter(entity::conversations::Column::Uuid.eq(conversation_uuid))
         .one(&txn).await?;
     let Some(conversation) = conversation else {
+        // add conversation if doesn't exist (i.e. another window deleted it
+        // when the current window still had it loaded and expected it to exist
         return Ok(Some(_add_conversation(exchanges, txn).await?));
     };
 
