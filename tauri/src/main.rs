@@ -8,7 +8,7 @@ use migration::{Migrator, MigratorTrait};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use sea_orm::{ActiveModelTrait, ColumnTrait, Database, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
     Set, TransactionTrait};
-use serde_error::Error;
+use serde_error::Error;     // necessary for tauri comamnds since anyhow::Error isn't serializable
 use tauri::Manager;
 use fetch_tokens::build_token_stream;
 
@@ -18,7 +18,7 @@ async fn config_dir() -> Result<std::path::PathBuf, Error> {
     let config_dir = dirs::config_dir()
             .ok_or(to_serde_err(anyhow!("Unable to find the config directory")))?
             .join("llm-playground");
-    if !Path::exists(&Path::new(&config_dir)) {
+    if !Path::new(&config_dir).exists() {
         // create if doesn't exist
         tokio::fs::create_dir(&config_dir).await
             .context("Error creating config directory")
@@ -144,7 +144,7 @@ async fn _add_conversation(
     }.insert(&txn).await?;
 
     add_exchanges(conversation.id, exchanges, &txn).await?;
-    let mut first_exchange = entity::exchanges::ActiveModel::from(first_exchange);
+    let mut first_exchange = first_exchange.into_active_model();
     first_exchange.conversation = Set(conversation.id);     // fixed first_exchange foreign key
     first_exchange.update(&txn).await?;
 
@@ -231,13 +231,13 @@ async fn _set_exchanges(
     let exchanges = add_exchanges(conversation.id, exchanges, &txn).await?;
     let first_exchange = exchanges.get(0).ok_or(anyhow!("Conversation cannot be set empty."))?;
 
-    let mut conversation = entity::conversations::ActiveModel::from(conversation);
+    let mut conversation = conversation.into_active_model();
     conversation.first_exchange = Set(first_exchange.id);
     conversation.last_updated = Set(chrono::Utc::now().timestamp());
     conversation.update(&txn).await?;
 
     futures::future::join_all(old_exchanges.into_iter()
-        .map(entity::exchanges::ActiveModel::from)
+        .map(entity::exchanges::Model::into_active_model)
         .map(|exchange|
             entity::exchanges::Entity::delete(exchange).exec(&txn))
     ).await.into_iter().collect::<Result<Vec<_>, _>>()?;
