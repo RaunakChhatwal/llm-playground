@@ -45,7 +45,16 @@
         ] ++ (if stdenv.isLinux then [
           webkitgtk
           gtk3
-        ] else []));
+        ] else [
+          iconv
+          darwin.apple_sdk.frameworks.Security
+          darwin.apple_sdk.frameworks.CoreServices
+          darwin.apple_sdk.frameworks.CoreFoundation
+          darwin.apple_sdk.frameworks.Foundation
+          darwin.apple_sdk.frameworks.AppKit
+          darwin.apple_sdk.frameworks.WebKit
+          darwin.apple_sdk.frameworks.Cocoa
+        ]));
 
         llm-playground = craneLib.mkCargoDerivation (with pkgs; rec {
           pname = "llm-playground";
@@ -53,7 +62,9 @@
 
           src = lib.cleanSource ./.;
           strictDeps = false;
-          buildPhaseCargoCommand = ''
+          buildPhaseCargoCommand = (if stdenv.isLinux then "" else ''
+            export RUSTFLAGS="-L ${iconv}/lib"
+          '') + ''
             export HOME=/tmp/homeless-shelter
             [[ -e $HOME ]] || mkdir $HOME
             unset SSL_CERT_FILE
@@ -65,10 +76,10 @@
             "${gsettings-desktop-schemas}/share/gsettings-schemas/${gsettings-desktop-schemas.name}"
             "${gtk3}/share/gsettings-schemas/${gtk3.name}"
             "$XDG_DATA_DIRS"];
-          installPhaseCommand = if stdenv.isLinux then ''
+          installPhase = if stdenv.isLinux then ''
             mkdir -p $out/bin
             mv ./target/release/llm-playground $out/bin
-            patchelf --set-rpath ${libPath} \
+            patchelf --set-rpath ${libPath} \             # why is this necessary??
               --set-interpreter $(cat $NIX_CC/nix-support/dynamic-linker) \
               $out/bin/llm-playground
             mv ./bundle/share $out
@@ -83,16 +94,14 @@
             Type=Application
             EOF
           '' else ''
-            mv ./target/release/llm-playground ./bundle/Contents/MacOS
+            mkdir ./bundle/Contents/MacOS && cp ./target/release/llm-playground ./bundle/Contents/MacOS
             APPDIR="$out/Applications/llm-playground.app"
             mkdir -p $APPDIR
             mv ./bundle/Contents $APPDIR
-            cat << EOF > "$out/bin/llm-playground"
-            #!${stdenvNoCC.shell}
-            open -na "$APP_DIR" --args "$@"
-            EOF
-            chmod +x "$out/bin/llm-playground"
+            mkdir -p $out/bin
+            mv ./target/release/llm-playground $out/bin
           '';
+          doInstallCargoArtifacts = false;
           cargoArtifacts = ./.;
 
           nativeBuildInputs = with pkgs; [
@@ -101,9 +110,10 @@
             wasm-bindgen-cli
             tailwindcss
             python3
-            autoPatchelfHook
             pkg-config
-          ];
+          ] ++ (if stdenv.isLinux then [
+            autoPatchelfHook    # this hook breaks on macos due to mach-o
+          ] else []);
 
           inherit buildInputs;
         });
@@ -115,14 +125,12 @@
         packages.default = llm-playground;
 
         devShells.default = pkgs.mkShell (with pkgs; {
-          nativeBuildInputs = [
+          buildInputs = buildInputs ++ [
             trunk
             tailwindcss
             wasm-bindgen-cli
             pkg-config
           ];
-
-          inherit buildInputs;
         });
       }
     );
