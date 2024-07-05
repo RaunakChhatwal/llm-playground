@@ -26,7 +26,7 @@ async fn load_conversations(conversations: RwSignal<Vec<RwSignal<Conversation>>>
 
     let synchronized_conversation = new_conversations.into_iter()
         .map(|new_conversation| uuid_to_conversation.get(&new_conversation.uuid)
-            .map(|conversation|{
+            .map(|conversation| {
                 conversation.set(new_conversation.clone());
                 *conversation
             })
@@ -84,10 +84,10 @@ pub fn History(menu: RwSignal<Menu>) -> impl IntoView {
                 <For each=conversations
                     key=|conversation| conversation.get_untracked().uuid
                     children=move |conversation| view! {
-                        <p class="text-[0.9em]">{local_formatted_time(conversation())}</p>
+                        <p class="text-[0.9em]">{move || local_formatted_time(conversation())}</p>
                         <a class="truncate w-[45vw] text-blue-600 cursor-pointer"
                             on:click=move |_| on_load(Some(conversation.get_untracked().uuid))
-                        >{conversation().title}</a>
+                        >{move || conversation().title}</a>
                         <a class="text-blue-600 cursor-pointer"
                             on:click=move |_| on_delete(conversation.get_untracked().uuid)
                         >"delete"</a>

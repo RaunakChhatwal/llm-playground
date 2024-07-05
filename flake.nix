@@ -79,7 +79,7 @@
           installPhase = if stdenv.isLinux then ''
             mkdir -p $out/bin
             mv ./target/release/llm-playground $out/bin
-            patchelf --set-rpath ${libPath} \             # why is this necessary??
+            patchelf --set-rpath ${libPath} \
               --set-interpreter $(cat $NIX_CC/nix-support/dynamic-linker) \
               $out/bin/llm-playground
             mv ./bundle/share $out

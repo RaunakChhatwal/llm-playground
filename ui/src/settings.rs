@@ -140,8 +140,7 @@ fn KeyInput(new_key: RwSignal<Option<APIKey>>) -> impl IntoView {
         let new_provider = new_key().map(|new_key| new_key.provider.to_string());
         for &provider in Provider::VARIANTS {
             let input = document().get_element_by_id(&format!("provider-{}", provider))
-                .and_then(|element|
-                    element.dyn_into::<web_sys::HtmlInputElement>().ok());
+                .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok());
             let Some(input) = input else {
                 set_error(format!("Expected checkbox entry for {provider}"));
                 continue;
