@@ -73,14 +73,17 @@ pub fn History(menu: RwSignal<Menu>) -> impl IntoView {
 
     view! {
         <div class="relative flex flex-col items-center mx-auto md:w-[max-content] md:min-w-[60vw]
-                    h-full p-4 md:p-[5vh] overflow-y-hidden"
+                    h-full px-[5vw] md:py-[5vh] overflow-y-hidden"
                 style:display=move || (menu.get() != Menu::History).then(|| "None")>
             <Button class="mr-auto" label="Back" to_hide
                 on_click=Box::new(move || menu.set(Menu::Menu)) />
             <h1 class="text-[1.25em]">"History"</h1>
             <div class="w-full mt-2"><ErrorMessage error /></div>
-            <div class="grid grid-cols-[repeat(3,max-content)] gap-[5vh] px-[5vw] w-full
-                    overflow-y-auto justify-center items-center my-[10vh] text-[0.925em]">
+            <p class="w-full mt-[10vh] mr-auto" style:display=move || (!conversations().is_empty()).then(|| "None")>
+                "No conversations saved."
+            </p>
+            <div class="grid grid-cols-[repeat(3,max-content)] gap-[5vh] my-[10vh] w-full
+                    overflow-y-auto justify-center items-center text-[0.925em]">
                 <For each=conversations
                     key=|conversation| conversation.get_untracked().uuid
                     children=move |conversation| view! {

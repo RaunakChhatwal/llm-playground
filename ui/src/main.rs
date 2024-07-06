@@ -37,7 +37,10 @@ fn App() -> impl IntoView {
     let config = create_rw_signal(common::Config::default());
     let menu = create_rw_signal(Menu::Chat);
 
-    *crate::util::_conversation_uuid.write().unwrap() = conversation_uuid;
+    match crate::util::_conversation_uuid.write() {
+        Ok(mut _conversation_uuid) => *_conversation_uuid = conversation_uuid,
+        Err(error) => eprintln!("{error}")      // this is unreachable so not handling error
+    }
 
     view! {
         <Chat config menu />

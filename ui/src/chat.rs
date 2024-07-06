@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use anyhow::{anyhow, bail, Result};
 use common::{Config, Exchange};
 use futures::FutureExt;
 use gloo_utils::format::JsValueSerdeExt;
-use leptos::*;
+use leptos::{*, leptos_dom::log};
 use tokio::sync::mpsc::UnboundedReceiver;
 use wasm_bindgen::{JsValue, prelude::*};
 use crate::commands::{add_conversation, delete_conversation, load_exchanges};
@@ -14,6 +14,26 @@ lazy_static::lazy_static! {
     // anyhow! macro doesn't work if there is a static variable named "error" in the namespace
     pub static ref signal_pair: (ReadSignal<String>, WriteSignal<String>) = create_signal("".into());
     pub static ref set_error: WriteSignal<String> = signal_pair.1;
+}
+
+fn update_message_box_size(message_box: web_sys::HtmlTextAreaElement) -> Result<(), JsValue> {
+    message_box.set_attribute("style", "height: auto;")?;
+    let style = format!("height: {}px;", message_box.scroll_height());
+    message_box.set_attribute("style", &style)
+}
+
+fn update_message_box_height(exchanges: &Vec<(usize, RwSignal<Exchange>)>) -> Result<(), JsValue> {
+    todo!()
+}
+
+async fn sleep(duration: Duration) {
+    let (send, recv) = tokio::sync::oneshot::channel();
+
+    set_timeout(move || {
+        let _ = send.send(());
+    }, duration);
+
+    recv.await.unwrap_or(std::future::pending().await)  // std::future::pending to prevent infinite loop
 }
 
 #[component]
@@ -43,20 +63,17 @@ fn MessageBox(
     create_effect({
         let id = id.clone();
         move |_| {
-            let content_box = document().get_element_by_id(&id)
+            let message_box = document().get_element_by_id(&id)
                 .expect("This element exists.")
                 .dyn_into::<web_sys::HtmlTextAreaElement>()
                 .expect("This is a textarea element.");
 
-            let content = content();
-            if content_box.value() != content {
+            let message = content();
+            if message_box.value() != message {
                 // this is different from setting the textarea's value html attribute, which will not work
-                content_box.set_value(&content);
-                content_box.set_attribute("style", "height: auto;")
-                    .expect("The style attribute is available for every element.");
-                let style = format!("height: {}px;", content_box.scroll_height());
-                content_box.set_attribute("style", &style)
-                    .expect("The style attribute is available for every element.");
+                message_box.set_value(&message);
+                update_message_box_size(message_box)
+                    .unwrap_or_else(|error| set_error(format!("Unable to update message box height: {error:?}")));
             }
         }
     });
@@ -64,9 +81,7 @@ fn MessageBox(
     let class = format!("{} flex-none w-full min-h-[2em] px-2 pt-1 pb-2 border border-[#303038]
         bg-[#222222] text-[0.9em] overflow-hidden resize-none", class);
     view! {
-        <textarea id=id rows=rows class=class type="text"
-            placeholder=placeholder on:input=on_input
-        ></textarea>
+        <textarea id=id rows=rows class=class type="text" placeholder=placeholder on:input=on_input></textarea>
     }
 }
 
@@ -104,9 +119,8 @@ fn ExchangeComponent(
 
     view! {
         <div class="relative flex flex-col">
-            <button
+            <button on:click=move |_| on_delete()
                 class="absolute top-[-10px] right-[10px] text-[1.5rem] text-[#AAAABB]"
-                on:click=move |_| on_delete()
             >"-"</button>
             <MessageBox id=format!("message-box-{}", 2*key) rows=1 class="".into()
                 placeholder=None content=user_message set_content=set_user_message />
@@ -122,6 +136,23 @@ fn Exchanges(
     exchanges: RwSignal<Vec<(usize, RwSignal<Exchange>)>>,
     streaming: RwSignal<bool>
 ) -> impl IntoView {
+    let resized = Arc::new(tokio::sync::Notify::new());
+    let on_resize = Closure::<dyn Fn() + 'static>::new({
+        let resized = Arc::clone(&resized);
+        move || resized.notify_one()
+    });
+
+    spawn_local(async move {
+        loop {
+            futures::join!(resized.notified(), sleep(Duration::from_millis(250)));
+            exchanges.with_untracked(|exchanges| update_message_box_sizes(exchanges))
+                .unwrap_or_else(|error| log!("Unable to update message box sizes: {error:?}"));
+        }
+    });
+
+    window().set_onresize(Some(on_resize.as_ref().unchecked_ref()));
+    std::mem::forget(on_resize);
+
     view! {
         <div class="flex flex-col">
             <For each=exchanges
@@ -190,7 +221,7 @@ async fn build_token_stream(prompt: &str, config: Config, exchanges: Vec<Exchang
     spawn_local(async move {
         close.notified().await;
         let _ = unlisten.call0(&JsValue::null());
-        drop(on_token);     // in order to keep on_token alive until closed
+        drop(on_token);     // move on_tokens into this closure to keep it alive
     });
 
     return Ok(recv);
