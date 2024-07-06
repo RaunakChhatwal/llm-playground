@@ -12,6 +12,53 @@ lazy_static::lazy_static! {
     pub static ref set_error: WriteSignal<String> = signal_pair.1;
 }
 
+pub fn update_textarea_height(textarea: &HtmlElement<html::Textarea>) {
+    textarea.set_attribute("style", "height: auto;")
+        .unwrap_or_else(|error| set_error(format!("{error:?}")));
+    let style = format!("height: {}px;", textarea.scroll_height());
+    textarea.set_attribute("style", &style)
+        .unwrap_or_else(|error| set_error(format!("{error:?}")));
+}
+
+#[component]
+fn SystemPromptInput(config: RwSignal<Config>, menu: RwSignal<Menu>) -> impl IntoView {
+    let class = "flex-none w-full min-h-[2em] px-2 pt-1 pb-2 border border-[#303038]
+        bg-[#222222] text-[0.9em] overflow-hidden resize-none";
+    let system_prompt_input = view! {
+        <textarea rows=2 class=class type="text"></textarea>
+    };
+
+    let on_input = Closure::<dyn Fn(web_sys::Event) + 'static>::new({
+        let system_prompt_input = system_prompt_input.clone();
+        move |event| {
+            config.update(|config| config.system_prompt = event_target_value(&event));
+            update_textarea_height(&system_prompt_input);
+        }
+    });
+    system_prompt_input.set_oninput(Some(on_input.as_ref().unchecked_ref()));
+    std::mem::forget(on_input);
+
+    // this is because the value element attribute would not work
+    create_effect({
+        let system_prompt_input = system_prompt_input.clone();
+        move |_| {
+            menu.track();       // this is because textarea.scroll_height() defends on the current menu
+            config.with(|config| {
+                // this is different from setting the textarea's value html attribute, which will not work
+                system_prompt_input.set_value(&config.system_prompt);
+                update_textarea_height(&system_prompt_input);
+            });
+        }
+    });
+
+    view! {
+        <div class="col-span-2 flex flex-col">
+            <label class="mb-2">"System prompt:"</label>
+            {system_prompt_input}
+        </div>
+    }
+}
+
 #[component]
 fn TemperatureSlider(config: RwSignal<Config>) -> impl IntoView {
     let on_input = move |event| {
@@ -22,63 +69,53 @@ fn TemperatureSlider(config: RwSignal<Config>) -> impl IntoView {
         config.update(|config| config.temperature = temperature);
     };
 
-    create_effect(move |_| {
-        let input = document().get_element_by_id("temperature-slider")
-            .expect("This element exists.")
-            .dyn_into::<web_sys::HtmlInputElement>()
-            .expect("This is an input element.");
+    let temperature_slider = view! {
+        <input class="accent-blue-900" id="temperature-slider"
+            on:input=on_input type="range" min="0" max="1" step="0.1" />
+    };
 
-        let temperature = config().temperature.to_string();
-        if input.value() != temperature {
-            // this is different from setting the input's value html attribute, which will not work
-            input.set_value(&temperature);
+    create_effect({
+        let temperature_slider = temperature_slider.clone();
+        move |_| {
+            let temperature = config().temperature.to_string();
+            if temperature_slider.value() != temperature {
+                // this is different from setting the input's value html attribute, which will not work
+                temperature_slider.set_value(&temperature);
+            }
         }
     });
 
-    view! {
+    return view! {
         <label>"Temperature:"</label>
         <div class="flex items-center">
-            <input class="accent-blue-900" id="temperature-slider" type="range"
-               min="0" max="1" step="0.1"
-               on:input=on_input />
+            {temperature_slider}
             <span class="mx-2">"|"</span>
             <span>{move || config().temperature.to_string()}</span>
         </div>
-    }
+    };
 }
 
 #[component]
-fn MaxTokensSlider(config: RwSignal<Config>,) -> impl IntoView {
-    let on_input = move |event| {
-        let Ok(max_tokens) = event_target_value(&event).parse::<u32>() else {
-            set_error("The slider should only permit integers due to its integer step.".into());
-            return;
-        };
-        config.update(|config| config.max_tokens = max_tokens);
+fn MaxTokensInput(max_tokens: RwSignal<String>,) -> impl IntoView {
+    let on_input = move |event| max_tokens.set(event_target_value(&event));
+
+    let max_tokens_input = view! {
+        <input type="text" on:input=on_input
+            class="px-2 py-1 bg-[#222222] border border-[#33333A] text-[0.9em]" />
     };
 
-    create_effect(move |_| {
-        let input = document().get_element_by_id("max-tokens-slider")
-            .expect("This element exists.")
-            .dyn_into::<web_sys::HtmlInputElement>()
-            .expect("This is an input element.");
-
-        let max_tokens = config().max_tokens.to_string();
-        if input.value() != max_tokens {
-            // this is different from setting the input's value html attribute, which will not work
-            input.set_value(&max_tokens);
-        }
+    create_effect({
+        let max_tokens_input = max_tokens_input.clone();
+        move |_| max_tokens.with(|max_tokens|
+            if &max_tokens_input.value() != max_tokens {
+                max_tokens_input.set_value(max_tokens);
+            }
+        )
     });
 
     view! {
         <label>"Max tokens:"</label>
-        <div class="flex items-center">
-            <input class="accent-blue-900" id="max-tokens-slider" type="range"
-               min="0" max="4096" step="1"
-               on:input=on_input />
-            <span class="mx-2">"|"</span>
-            <span>{move || config().max_tokens.to_string()}</span>
-        </div>
+        {max_tokens_input}
     }
 }
 
@@ -87,22 +124,24 @@ fn ModelInput(config: RwSignal<Config>) -> impl IntoView {
     let on_input = move |event| config.update(|config|
         config.model = event_target_value(&event));
 
-    create_effect(move |_| {
-        let input = document().get_element_by_id("model-input")
-            .expect("This element exists.")
-            .dyn_into::<web_sys::HtmlInputElement>()
-            .expect("This is an input element.");
+    let model_input = view! {
+        <input type="text" on:input=on_input
+            class="px-2 py-1 bg-[#222222] border border-[#33333A] text-[0.9em]" />
+    };
 
-        let config = config();
-        if input.value() != config.model {
-            input.set_value(&config.model);
+    create_effect({
+        let model_input = model_input.clone();
+        move |_| {
+            let config = config();
+            if model_input.value() != config.model {
+                model_input.set_value(&config.model);
+            }
         }
     });
 
     view! {
         <label>"Model:"</label>
-        <input id="model-input" type="text" on:input=on_input
-            class="px-2 py-1 bg-[#222222] border border-[#33333A] text-[0.9em]" />
+        {model_input}
     }
 }
 
@@ -112,20 +151,21 @@ fn KeyEntry(
     selected_key: Signal<Option<String>>,
     on_remove: Box<dyn Fn(&str)>
 ) -> impl IntoView {
-    let name = api_key.name.clone();
-    create_effect(move |_| {
-        let input = document().get_element_by_id(&format!("key-name-{}", name))
-            .expect("This element exists.")
-            .dyn_into::<web_sys::HtmlInputElement>()
-            .expect("This is an input element.");
+    let key_entry = view! {
+        <input type="radio" value=api_key.name.clone() name="key_name" />
+    };
 
-        // this is different from setting the input's checked html attribute, which will not work
-        input.set_checked(selected_key().as_ref() == Some(&name));
+    create_effect({
+        let name = api_key.name.clone();
+        let key_entry = key_entry.clone();
+        move |_| {
+            // this is different from setting the input's checked html attribute, which will not work
+            key_entry.set_checked(selected_key().as_ref() == Some(&name));
+        }
     });
 
     view! {
-        <input type="radio" value=api_key.name.clone() name="key_name"
-            id=format!("key-name-{}", api_key.name.clone()) />
+        {key_entry}
         <p class="mx-2">{api_key.name.clone()}</p>
         <button class="px-[5px] w-[max-content] h-[max-content] border border-[#33333A]
                 bg-[#222222] hover:bg-[#33333A] text-[#AAAABB]"
@@ -270,12 +310,14 @@ fn KeyList(config: RwSignal<Config>) -> impl IntoView {
 pub fn Settings(active_config: RwSignal<Config>, menu: RwSignal<Menu>) -> impl IntoView {
     let error = signal_pair.0;
     let config = create_rw_signal(Config::default());
+    let max_tokens = create_rw_signal("".into());
     let saved_config = create_rw_signal(None);
 
     spawn_local(async move {
         match load_config().await {
             Ok(loaded_config) => {
                 config.set(loaded_config.clone());
+                max_tokens.set(loaded_config.max_tokens.to_string());
                 active_config.set(loaded_config.clone());
                 saved_config.set(Some(loaded_config));
             },
@@ -302,28 +344,42 @@ pub fn Settings(active_config: RwSignal<Config>, menu: RwSignal<Menu>) -> impl I
 
     let to_hide = Signal::derive(move || {
         let config = config();
-        return config == active_config() && Some(config) == saved_config();
+        let active_config = active_config();
+        return config == active_config &&
+            max_tokens() == active_config.max_tokens.to_string() &&
+            Some(config) == saved_config();
     });
 
     let on_discard = move || {
         if let Some(saved_config) = saved_config.get_untracked() {
             config.set(saved_config.clone());
+            max_tokens.set(saved_config.max_tokens.to_string());
             active_config.set(saved_config);
         } else {
             set_error("Bad config.".into());
         };
     };
 
-    let on_apply = move || spawn_local(async move {
+    let on_apply = move || {
+        let max_tokens = match max_tokens.get_untracked().parse::<u32>() {
+            Ok(max_tokens) => max_tokens,
+            Err(error) => {
+                set_error(error.to_string());
+                return;
+            }
+        };
+        config.update(|config| config.max_tokens = max_tokens);
         let config = config.get_untracked();
         active_config.set(config.clone());
-        if let Err(error_message) = save_config(config.clone()).await {
-            set_error(error_message.to_string());
-        } else {
-            saved_config.set(Some(config));
-            set_error("".into());
-        }
-    });
+        spawn_local(async move {
+            if let Err(error) = save_config(config.clone()).await {
+                set_error(error.to_string());
+            } else {
+                saved_config.set(Some(config));
+                set_error("".into());
+            }
+        });
+    };
 
     view! {
         <div class="relative flex flex-col items-center mx-auto md:w-[max-content] md:min-w-[60vw]
@@ -334,10 +390,10 @@ pub fn Settings(active_config: RwSignal<Config>, menu: RwSignal<Menu>) -> impl I
                 on_click=Box::new(move || menu.set(Menu::Menu)) />
             <h1 class="text-[1.25em]">"Settings"</h1>
             <div class="w-full mt-2"><ErrorMessage error /></div>
-            <div class="grid grid-cols-[repeat(2,max-content)] gap-[6.5vh]
-                    items-center my-auto overflow-y-auto">
+            <div class="grid grid-cols-[repeat(2,max-content)] gap-[6vh] items-center my-auto overflow-y-auto">
+                <SystemPromptInput config menu />
                 <TemperatureSlider config />
-                <MaxTokensSlider config />
+                <MaxTokensInput max_tokens />
                 <ModelInput config />
                 <KeyList config />
             </div>

@@ -7,23 +7,12 @@ use leptos::{*, leptos_dom::log};
 use tokio::sync::mpsc::UnboundedReceiver;
 use wasm_bindgen::{JsValue, prelude::*};
 use crate::commands::{add_conversation, delete_conversation, load_exchanges};
-use crate::util::{conversation_uuid, get_conversation_uuid_untracked, listen,
-    set_conversation_uuid, set_conversation_uuid_untracked, Button, ErrorMessage, Menu};
+use crate::util::{conversation_uuid, get_conversation_uuid_untracked, listen, set_conversation_uuid, set_conversation_uuid_untracked, Button, ErrorMessage, Menu};
 
 lazy_static::lazy_static! {
     // anyhow! macro doesn't work if there is a static variable named "error" in the namespace
     pub static ref signal_pair: (ReadSignal<String>, WriteSignal<String>) = create_signal("".into());
     pub static ref set_error: WriteSignal<String> = signal_pair.1;
-}
-
-fn to_anyhow(error: JsValue) -> anyhow::Error {
-    anyhow!("{error:?}")
-}
-
-fn update_message_box_height(message_box: web_sys::HtmlTextAreaElement) -> Result<()> {
-    message_box.set_attribute("style", "height: auto;").map_err(to_anyhow)?;
-    let style = format!("height: {}px;", message_box.scroll_height());
-    message_box.set_attribute("style", &style).map_err(to_anyhow)
 }
 
 async fn sleep(duration: Duration) {
@@ -36,11 +25,12 @@ async fn sleep(duration: Duration) {
     recv.await.unwrap_or_else(|error| log!("Unable to sleep: {error}"));
 }
 
-fn get_message_box_by_id(id: &str) -> Result<web_sys::HtmlTextAreaElement> {
-    document().get_element_by_id(id)
-        .ok_or(anyhow!("Element with id {id} not found"))?
-        .dyn_into::<web_sys::HtmlTextAreaElement>()
-        .map_err(|_| anyhow!("Element with id {id} not a text area element"))
+pub fn update_textarea_height(textrea: &web_sys::HtmlTextAreaElement) -> Result<()> {
+    textrea.set_attribute("style", "height: auto;")
+        .map_err(|error| anyhow!("{error:?}"))?;
+    let style = format!("height: {}px;", textrea.scroll_height());
+    textrea.set_attribute("style", &style)
+        .map_err(|error| anyhow!("{error:?}"))
 }
 
 #[component]
@@ -52,47 +42,35 @@ fn MessageBox(
     content: Signal<String>,
     set_content: SignalSetter<String>,
 ) -> impl IntoView {
-    let on_input = {
-        let id = id.clone();
+    let class = format!("{} flex-none w-full min-h-[2em] px-2 pt-1 pb-2 border border-[#303038]
+        bg-[#222222] text-[0.9em] overflow-hidden resize-none", class);
+    let message_box = view! {
+        <textarea id=id.clone() rows=rows class=class type="text" placeholder=placeholder></textarea>
+    };
+
+    let on_input = Closure::<dyn Fn(web_sys::Event) + 'static>::new({
+        let message_box = message_box.clone();
         move |event| {
             set_content(event_target_value(&event));
-            let content_box = document().get_element_by_id(&id)
-                .expect("This element exists.");
-            content_box.set_attribute("style", "height: auto;")
-                .expect("The style attribute is available for every element.");
-            let style = format!("height: {}px;", content_box.scroll_height());
-            content_box.set_attribute("style", &style)
-                .expect("The style attribute is available for every element.");
+            update_textarea_height(&message_box).unwrap_or_else(|error|
+                set_error(format!("Unable to update message box height: {error:?}")));
         }
-    };
+    });
+    message_box.set_oninput(Some(on_input.as_ref().unchecked_ref()));
+    std::mem::forget(on_input);
 
     // this is because value=content entry in the view macro below does not work
     create_effect({
-        let id = id.clone();
-        move |_| {
-            let message_box= match get_message_box_by_id(&id) {
-                Ok(message_box) => message_box,
-                Err(error) => {
-                    set_error(error.to_string());
-                    return;
-                }
-            };
-
-            let message = content();
-            if message_box.value() != message {
-                // this is different from setting the textarea's value html attribute, which will not work
-                message_box.set_value(&message);
-                update_message_box_height(message_box).unwrap_or_else(|error|
-                    set_error(format!("Unable to update message box height: {error:?}")));
-            }
-        }
+        let message_box = message_box.clone();
+        move |_| content.with(|message| {
+            // this is different from setting the textarea's value html attribute, which will not work
+            message_box.set_value(&message);
+            update_textarea_height(&message_box).unwrap_or_else(|error|
+                set_error(format!("Unable to update message box height: {error:?}")));
+        })
     });
 
-    let class = format!("{} flex-none w-full min-h-[2em] px-2 pt-1 pb-2 border border-[#303038]
-        bg-[#222222] text-[0.9em] overflow-hidden resize-none", class);
-    view! {
-        <textarea id=id rows=rows class=class type="text" placeholder=placeholder on:input=on_input></textarea>
-    }
+    return message_box;
 }
 
 #[component]
@@ -140,6 +118,13 @@ fn ExchangeComponent(
     }
 }
 
+fn get_message_box_by_id(id: usize) -> Result<web_sys::HtmlTextAreaElement> {
+    document().get_element_by_id(&format!("message-box-{id}"))
+        .ok_or(anyhow!("Element with id {id} not found"))?
+        .dyn_into::<web_sys::HtmlTextAreaElement>()
+        .map_err(|_| anyhow!("Element with id {id} not a text area element"))
+}
+
 #[component]
 fn Exchanges(
     new_exchange: RwSignal<Exchange>,
@@ -157,7 +142,7 @@ fn Exchanges(
             futures::join!(update_heights.notified(), sleep(Duration::from_millis(250)));
             exchanges.with_untracked(|exchanges| exchanges.iter()
                 .flat_map(|(key, _)| vec![2*key, 2*key + 1])
-                .map(|id| update_message_box_height(get_message_box_by_id(&format!("message-box-{id}"))?))
+                .map(|id| update_textarea_height(&get_message_box_by_id(id)?))
                 .collect::<Result<(), _>>()
             ).unwrap_or_else(|error| log!("Unable to update message box sizes: {error}"));
         }
@@ -334,8 +319,7 @@ fn BottomButtons(
                 Err(error) => set_error(error.to_string())
             }
 
-            let height_hidden = exchanges_div.scroll_height() - exchanges_div.client_height();
-            let is_scrollbar_bottom = height_hidden == exchanges_div.scroll_top();
+            let scroll_top = exchanges_div.scroll_top();
 
             let _new_exchange = new_exchange.get_untracked();
             if _new_exchange.assistant_message.is_empty() {     // whether canceled before response
@@ -356,9 +340,7 @@ fn BottomButtons(
             streaming.set(false);
 
             sleep(Duration::from_millis(25)).await;     // don't know why this is necessary
-            if is_scrollbar_bottom {
-                exchanges_div.set_scroll_top(exchanges_div.scroll_height() - exchanges_div.client_height());
-            }
+            exchanges_div.set_scroll_top(scroll_top);
         });
     };
 
