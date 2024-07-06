@@ -241,13 +241,20 @@ async fn build_token_stream(prompt: &str, config: Config, exchanges: Vec<Exchang
 }
 
 async fn collect_tokens(
-    mut token_stream: UnboundedReceiver<Result<String>>,
     exchange: RwSignal<Exchange>,
+    exchanges_div: &web_sys::HtmlDivElement,
+    mut token_stream: UnboundedReceiver<Result<String>>,
 ) {
     while let Some(token) = token_stream.recv().await {
         match token {
-            Ok(token) => exchange.update(|exchange|
-                exchange.assistant_message.push_str(&token)),
+            Ok(token) => {
+                let height_hidden = exchanges_div.scroll_height() - exchanges_div.client_height();
+                let is_scrollbar_bottom = height_hidden == exchanges_div.scroll_top();
+                exchange.update(|exchange| exchange.assistant_message.push_str(&token));
+                if is_scrollbar_bottom {
+                    exchanges_div.set_scroll_top(exchanges_div.scroll_height() - exchanges_div.client_height());
+                }
+            },
             Err(error) => {
                 set_error(error.to_string());
                 break;
@@ -262,6 +269,7 @@ extern "C" {
     async fn emit(cmd: &str, args: JsValue) -> Result<JsValue, JsValue>;
 }
 
+// update this conversation's exchanges in the conversation history database
 async fn set_exchanges(exchanges: Vec<(usize, Exchange)>) {
     if exchanges.is_empty() {
         set_error("A conversation cannot be empty.".into());
@@ -290,11 +298,17 @@ fn BottomButtons(
     config: RwSignal<Config>,
     menu: RwSignal<Menu>,
     exchanges: RwSignal<Vec<(usize, RwSignal<Exchange>)>>,
+    exchanges_div: HtmlElement<html::Div>,
     new_exchange: RwSignal<Exchange>,
     prompt: RwSignal<String>,
     streaming: RwSignal<bool>,
 ) -> impl IntoView {
+    let exchanges_div = std::rc::Rc::new(exchanges_div);
+
     let on_submit = move || {
+        let height_hidden = exchanges_div.scroll_height() - exchanges_div.client_height();
+        let is_scrollbar_bottom = height_hidden == exchanges_div.scroll_top();
+
         streaming.set(true);
         set_error("".to_string());
         let _prompt = prompt();
@@ -309,11 +323,19 @@ fn BottomButtons(
             assistant_message: "".to_string()
         });
 
+        if is_scrollbar_bottom {
+            exchanges_div.set_scroll_top(exchanges_div.scroll_height() - exchanges_div.client_height());
+        }
+
+        let exchanges_div = exchanges_div.clone();
         spawn_local(async move {
             match build_token_stream(&_prompt, config.get_untracked(), _exchanges).await {
-                Ok(token_stream) => collect_tokens(token_stream, new_exchange).await,
+                Ok(token_stream) => collect_tokens(new_exchange, exchanges_div.as_ref(), token_stream).await,
                 Err(error) => set_error(error.to_string())
             }
+
+            let height_hidden = exchanges_div.scroll_height() - exchanges_div.client_height();
+            let is_scrollbar_bottom = height_hidden == exchanges_div.scroll_top();
 
             let _new_exchange = new_exchange.get_untracked();
             if _new_exchange.assistant_message.is_empty() {     // whether canceled before response
@@ -325,12 +347,18 @@ fn BottomButtons(
                     let exchanges = exchanges.iter()
                         .map(|(key, exchange)| (*key, exchange.get_untracked()))
                         .collect::<Vec<_>>();
-                    spawn_local(set_exchanges(exchanges).map(drop));
+                    // update this conversation's exchanges to the database
+                    spawn_local(set_exchanges(exchanges));
                 });
                 new_exchange.set(Exchange::default());
             }
 
             streaming.set(false);
+
+            sleep(Duration::from_millis(25)).await;     // don't know why this is necessary
+            if is_scrollbar_bottom {
+                exchanges_div.set_scroll_top(exchanges_div.scroll_height() - exchanges_div.client_height());
+            }
         });
     };
 
@@ -400,15 +428,19 @@ pub fn Chat(config: RwSignal<Config>, menu: RwSignal<Menu>) -> impl IntoView {
         format!("{} {}", classes, (exchanges().is_empty() && !streaming()).then(|| "mb-auto")
             .unwrap_or("mt-auto mb-4 md:mb-8"));
 
+    let exchanges_div = view! {
+        <div id="exchanges" class="mb-4 md:mx-[15vw] overflow-y-auto"
+                style:display=move || (exchanges().is_empty() && !streaming()).then(|| "None")>
+            <Exchanges new_exchange exchanges update_heights streaming />
+        </div>
+    };
+
     view! {
         <div class="flex flex-col md:w-[80vw] md:mx-auto h-full p-4 md:py-[5vh] overflow-y-hidden"
                 style:display=move || (menu.get() != Menu::Chat).then(|| "None")>
             <h1 class="hidden md:block mb-6 text-[2em] font-serif">"LLM Playground"</h1>
             <ErrorMessage error />
-            <div class="mb-4 md:mx-[15vw] overflow-y-auto"
-                    style:display=move || (exchanges().is_empty() && !streaming()).then(|| "None")>
-                <Exchanges new_exchange exchanges update_heights streaming />
-            </div>
+            {exchanges_div.clone()}
             <div class=move || bottom_if_not_empty("flex-none md:mx-[14.5vw] max-h-[50vh] overflow-y-auto")>
                 <div class="flex flex-col">     // scrolling breaks without this useless div
                     <MessageBox id="prompt-box".into() rows=2 class="".into()
@@ -417,7 +449,7 @@ pub fn Chat(config: RwSignal<Config>, menu: RwSignal<Menu>) -> impl IntoView {
                 </div>
             </div>
             <div class="flex-none md:mx-[10vw] flex md:mx-8">
-                <BottomButtons config menu exchanges new_exchange prompt streaming />
+                <BottomButtons config menu exchanges exchanges_div new_exchange prompt streaming />
             </div>
         </div>
     }
