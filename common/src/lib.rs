@@ -27,6 +27,7 @@ pub struct APIKey {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
+    pub system_prompt: String,
     pub temperature: f64,
     pub max_tokens: u32,
     pub model: String,
@@ -37,6 +38,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            system_prompt: "no yapping".into(),
             temperature: 0.8,
             max_tokens: 1024,
             model: "".into(),

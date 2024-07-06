@@ -73,7 +73,7 @@ pub fn History(menu: RwSignal<Menu>) -> impl IntoView {
 
     view! {
         <div class="relative flex flex-col items-center mx-auto md:w-[max-content] md:min-w-[60vw]
-                    h-full px-[5vw] md:py-[5vh] overflow-y-hidden"
+                    h-full px-[5vw] py-[5vh] overflow-y-hidden"
                 style:display=move || (menu.get() != Menu::History).then(|| "None")>
             <Button class="mr-auto" label="Back" to_hide
                 on_click=Box::new(move || menu.set(Menu::Menu)) />

@@ -6,57 +6,64 @@ use reqwest_eventsource::{Event, EventSource};
 use serde_error::Error;
 use serde_json::{json, Value};
 
-fn build_request(api_key: &APIKey) -> Result<RequestBuilder> {
-    let mut headers = HeaderMap::new();
-    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-
-    let request_builder = match api_key.provider {
-        Provider::OpenAI => {
-            headers.insert("Authorization",
-                HeaderValue::from_str(&format!("Bearer {}", api_key.key))?);
-
-            reqwest::Client::new()
-                .post("https://api.openai.com/v1/chat/completions")
-                .headers(headers)
-        },
-        Provider::Anthropic => {
-            headers.insert("x-api-key", HeaderValue::from_str(&api_key.key)?);
-            headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
-
-            reqwest::Client::new()
-                .post("https://api.anthropic.com/v1/messages")
-                .headers(headers)
-        }
-    };
-
-    return Ok(request_builder);
-}
-
-fn build_request_body(
-    prompt: &str,
+fn build_openai_request_body(
     config: &Config,
     exchanges: Vec<Exchange>,
+    prompt: &str,
 ) -> serde_json::Value {
+    let messages = exchanges.iter()
+        .flat_map(|exchange|
+            vec![json!({
+                "role": "user",
+                "content": exchange.user_message
+            }), json!({
+                "role": "assistant",
+                "content": exchange.assistant_message
+            })])
+        .chain(std::iter::once(json!({
+            "role": "user",
+            "content": prompt
+        })));
+
     return json!({
         "model": config.model,
         "max_tokens": config.max_tokens,
         "temperature": config.temperature,
         "stream": true,
-        "messages": exchanges
-            .iter()
-            .flat_map(|Exchange { user_message, assistant_message }|
-                vec![json!({
-                    "role": "user",
-                    "content": user_message
-                }), json!({
-                    "role": "assistant",
-                    "content": assistant_message
-                })])
-            .chain(std::iter::once(json!({
+        "messages": std::iter::once(json!({
+            "role": "system",
+            "content": config.system_prompt
+        })).chain(messages).collect::<Vec<Value>>()
+    });
+}
+
+fn build_anthropic_request_body(
+    config: &Config,
+    exchanges: Vec<Exchange>,
+    prompt: &str,
+) -> serde_json::Value {
+    let messages = exchanges.iter()
+        .flat_map(|exchange|
+            vec![json!({
                 "role": "user",
-                "content": prompt
-            })))
-            .collect::<Vec<Value>>()
+                "content": exchange.user_message
+            }), json!({
+                "role": "assistant",
+                "content": exchange.assistant_message
+            })])
+        .chain(std::iter::once(json!({
+            "role": "user",
+            "content": prompt
+        })))
+        .collect::<Vec<Value>>();
+
+    return json!({
+        "model": config.model,
+        "max_tokens": config.max_tokens,
+        "temperature": config.temperature,
+        "stream": true,
+        "system": config.system_prompt,
+        "messages": messages
     });
 }
 
@@ -151,6 +158,39 @@ async fn collect_tokens(
     Ok(())
 }
 
+fn build_request(
+    api_key: &APIKey,
+    config: &Config,
+    exchanges: Vec<Exchange>,
+    prompt: &str,
+) -> Result<RequestBuilder> {
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+    let request_builder = match api_key.provider {
+        Provider::OpenAI => {
+            headers.insert("Authorization",
+                HeaderValue::from_str(&format!("Bearer {}", api_key.key))?);
+
+            reqwest::Client::new()
+                .post("https://api.openai.com/v1/chat/completions")
+                .headers(headers)
+                .body(build_openai_request_body(config, exchanges, prompt).to_string())
+        },
+        Provider::Anthropic => {
+            headers.insert("x-api-key", HeaderValue::from_str(&api_key.key)?);
+            headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
+
+            reqwest::Client::new()
+                .post("https://api.anthropic.com/v1/messages")
+                .headers(headers)
+                .body(build_anthropic_request_body(config, exchanges, prompt).to_string())
+        }
+    };
+
+    return Ok(request_builder);
+}
+
 #[tauri::command]
 pub async fn build_token_stream(
     window: tauri::Window,
@@ -161,9 +201,7 @@ pub async fn build_token_stream(
     let api_key = config.api_keys[config.api_key
         .ok_or(to_serde_err(anyhow!("No API Key selected.")))?].clone();
 
-    let request_builder = build_request(&api_key)
-        .map_err(to_serde_err)?
-        .body(build_request_body(prompt, &config, exchanges).to_string());
+    let request_builder = build_request(&api_key, &config, exchanges, prompt).map_err(to_serde_err)?;
 
     let event_source = EventSource::new(request_builder)
         .map_err(|error| Error::new(&error))?;
