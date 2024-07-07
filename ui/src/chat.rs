@@ -225,6 +225,11 @@ async fn build_token_stream(prompt: &str, config: Config, exchanges: Vec<Exchang
     return Ok(recv);
 }
 
+fn is_scrollbar_bottom(exchanges_div: &web_sys::HtmlDivElement, height_hidden: i32) -> bool {
+    let tolerance = 5;
+    return (height_hidden - exchanges_div.scroll_top()).abs() < tolerance;
+} 
+
 async fn collect_tokens(
     exchange: RwSignal<Exchange>,
     exchanges_div: &web_sys::HtmlDivElement,
@@ -234,7 +239,7 @@ async fn collect_tokens(
         match token {
             Ok(token) => {
                 let height_hidden = exchanges_div.scroll_height() - exchanges_div.client_height();
-                let is_scrollbar_bottom = height_hidden == exchanges_div.scroll_top();
+                let is_scrollbar_bottom = is_scrollbar_bottom(&exchanges_div, height_hidden);
                 exchange.update(|exchange| exchange.assistant_message.push_str(&token));
                 if is_scrollbar_bottom {
                     exchanges_div.set_scroll_top(exchanges_div.scroll_height() - exchanges_div.client_height());
@@ -292,7 +297,7 @@ fn BottomButtons(
 
     let on_submit = move || {
         let height_hidden = exchanges_div.scroll_height() - exchanges_div.client_height();
-        let is_scrollbar_bottom = height_hidden == exchanges_div.scroll_top();
+        let is_scrollbar_bottom = is_scrollbar_bottom(&exchanges_div, height_hidden);
 
         streaming.set(true);
         set_error("".to_string());

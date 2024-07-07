@@ -310,7 +310,7 @@ fn KeyList(config: RwSignal<Config>) -> impl IntoView {
 pub fn Settings(active_config: RwSignal<Config>, menu: RwSignal<Menu>) -> impl IntoView {
     let error = signal_pair.0;
     let config = create_rw_signal(Config::default());
-    let max_tokens = create_rw_signal("".into());
+    let max_tokens = create_rw_signal(Config::default().max_tokens.to_string());
     let saved_config = create_rw_signal(None);
 
     spawn_local(async move {
