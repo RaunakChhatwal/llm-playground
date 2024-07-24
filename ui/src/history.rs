@@ -39,6 +39,7 @@ async fn load_conversations(conversations: RwSignal<Vec<RwSignal<Conversation>>>
 pub fn History(menu: RwSignal<Menu>) -> impl IntoView {
     let error = signal_pair.0;
     let conversations = create_rw_signal(Vec::<RwSignal<Conversation>>::new());
+    let search_query = create_rw_signal(String::new());
 
     spawn_local(load_conversations(conversations));
 
@@ -71,6 +72,18 @@ pub fn History(menu: RwSignal<Menu>) -> impl IntoView {
         .to_string();
     let to_hide = create_signal(false).0.into();
 
+    #[component]
+    fn SearchBar(search_query: RwSignal<String>) -> impl IntoView {
+        view! {
+            <input
+                type="text"
+                placeholder="Search conversations..."
+                on:input=move |ev| search_query.set(event_target_value(&ev))
+                class="w-full px-3 py-2 mb-4 text-white bg-gray-700 rounded"
+            />
+        }
+    }
+
     view! {
         <div class="relative flex flex-col items-center mx-auto md:w-[max-content] md:min-w-[60vw]
                     h-full px-[5vw] py-[5vh] overflow-y-hidden"
@@ -79,6 +92,7 @@ pub fn History(menu: RwSignal<Menu>) -> impl IntoView {
                 on_click=Box::new(move || menu.set(Menu::Menu)) />
             <h1 class="text-[1.25em]">"History"</h1>
             <div class="w-full mt-2"><ErrorMessage error /></div>
+            <SearchBar search_query />
             <p class="w-full mt-[10vh] mr-auto" style:display=move || (!conversations().is_empty()).then(|| "None")>
                 "No conversations saved."
             </p>
