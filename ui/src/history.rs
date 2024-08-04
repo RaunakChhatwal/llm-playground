@@ -24,15 +24,17 @@ async fn load_conversations(conversations: RwSignal<Vec<RwSignal<Conversation>>>
         .map(|conversation| (conversation.get_untracked().uuid, conversation))
         .collect::<std::collections::HashMap<_, _>>();
 
-    let synchronized_conversations = new_conversations.into_iter()
-        .map(|new_conversation| uuid_to_conversation.get(&new_conversation.uuid)
-            .map(|conversation| {
-                conversation.set(new_conversation.clone());
-                *conversation
-            })
-            .unwrap_or_else(|| create_rw_signal(new_conversation)))
-        .collect();
-    conversations.set(synchronized_conversations);
+    conversations.update(|conversations| {
+        conversations.clear();
+        for new_conversation in new_conversations {
+            if let Some(&conversation) = uuid_to_conversation.get(&new_conversation.uuid) {
+                conversation.set(new_conversation);
+                conversations.push(conversation);
+            } else {
+                conversations.push(create_rw_signal(new_conversation));
+            }
+        }
+    });
 }
 
 #[component]
