@@ -61,18 +61,20 @@ async fn save_config(config: Config) -> Result<(), Error> {
         .map_err(|error| Error::new(&error))
 }
 
+async fn connect_to_database() -> Result<sea_orm::DatabaseConnection> {
+    let db_path = config_dir().await?
+        .join("conversations.db")
+        .to_str()
+        .map(str::to_string)
+        .ok_or(anyhow!("Unable to connect to database."))?;
+
+    Database::connect(&format!("sqlite://{}?mode=rwc", db_path)).await.map_err(Into::into)
+}
+
 // the database connection to <config-dir>/conversations.db
 // I chose sqlite over json for data consistency
 lazy_static::lazy_static! {
-    static ref CONN: Result<sea_orm::DatabaseConnection> = futures::executor::block_on(async {
-        let db_path = config_dir().await?
-            .join("conversations.db")
-            .to_str()
-            .map(str::to_string)
-            .ok_or(anyhow!("Unable to connect to database."))?;
-
-        Database::connect(&format!("sqlite://{}?mode=rwc", db_path)).await.map_err(Into::into)
-    });
+    static ref CONN: Result<sea_orm::DatabaseConnection> = futures::executor::block_on(connect_to_database());
 }
 
 async fn initiate_transaction() -> Result<sea_orm::DatabaseTransaction> {
@@ -294,6 +296,10 @@ fn watch_file(app: tauri::AppHandle, event_name: &'static str, file: &Path) -> R
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if !&config_dir().await?.join("config.json").exists() {
+        save_config(Config::default()).await?;
+    }
+
     let conn = CONN.as_ref().map_err(Deref::deref)?;
     Migrator::up(conn, None).await?;
 
