@@ -197,10 +197,8 @@ fn KeyInput(new_key: RwSignal<Option<APIKey>>) -> impl IntoView {
     });
 
     view! {
-        <div class="grid grid-cols-[repeat(2,max-content)] gap-2 text-[0.9em]"
-            on:change=on_change
-            style:display=move || new_key().is_none().then(|| "None")
-        >
+        <div class="grid grid-cols-[repeat(2,max-content)] gap-2 text-[0.9em]" on:change=on_change
+                style:display=move || new_key().is_none().then(|| "None")>
             <label>"Name:"</label>
             <input type="text" class="px-1 bg-[#222222] h-[2em] border border-[#33333A] text-[0.9em]"
                 on:input=move |event| new_key.update(|new_key| {
@@ -267,11 +265,13 @@ fn KeyList(config: RwSignal<Config>) -> impl IntoView {
                 set_error("API key name must be non-empty.".into());
                 return;
             }
+
             let mut api_keys = api_keys();
             if api_keys.iter().any(|api_key| api_key.name == new_api_key.name) {
                 set_error("New key name must be unique.".into());
                 return;
             }
+
             new_key.set(None);
             api_keys.push(new_api_key);
             set_api_keys(api_keys);
@@ -287,6 +287,7 @@ fn KeyList(config: RwSignal<Config>) -> impl IntoView {
         <div class="col-span-2 grid grid-cols-1 gap-4">
             <h2 class="text-[1.1em] underline">"API Keys"</h2>
             <div class="grid grid-cols-[repeat(3,max-content)] gap-2 items-center"
+                    style:display=move || new_key().is_some().then(|| "None")
                     on:change=move |event| set_selected_key(Some(event_target_value(&event)))>
                 <For each=api_keys
                     key=|api_key| api_key.name.clone()
