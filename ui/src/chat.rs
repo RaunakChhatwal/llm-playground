@@ -86,7 +86,7 @@ fn ExchangeComponent(
     );
     let (assistant_message, set_assistant_message) = create_slice(
         exchange, 
-        |exchange| exchange.assistant_message.clone(),
+        |exchange| exchange.assistant_message.trim().to_string(),
         |exchange, assistant_message| exchange.assistant_message = assistant_message
     );
 

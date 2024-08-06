@@ -9,7 +9,8 @@ pub fn to_serde_err(error: anyhow::Error) -> serde_error::Error {
     Eq, Hash, PartialEq, Serialize, VariantNames)]
 pub enum Provider {
     OpenAI,
-    Anthropic
+    Anthropic,
+    Google
 }
 
 impl Default for Provider {
