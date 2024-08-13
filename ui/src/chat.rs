@@ -4,7 +4,7 @@ use common::{Config, Exchange};
 use futures::FutureExt;
 use gloo_utils::format::JsValueSerdeExt;
 use leptos::{*, leptos_dom::log};
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio_stream::StreamExt;
 use wasm_bindgen::{JsValue, prelude::*};
 use crate::commands::{add_conversation, delete_conversation, load_exchanges};
 use crate::util::{conversation_uuid, get_conversation_uuid_untracked, listen, set_conversation_uuid, set_conversation_uuid_untracked, Button, ErrorMessage, Menu};
@@ -194,8 +194,12 @@ fn deserialize_event(event: JsValue) -> Result<Option<String>> {
 }
 
 async fn build_token_stream(prompt: &str, config: Config, exchanges: Vec<Exchange>)
--> Result<UnboundedReceiver<Result<String>>> {
-    crate::commands::build_token_stream(prompt, config, exchanges).await?;
+-> Result<Box<dyn futures::Stream<Item = Result<String>> + std::marker::Unpin>> {
+    let canceled = crate::commands::build_token_stream(prompt, config, exchanges).await?;
+    if canceled {
+        // the cancel button was clicked before the token stream could be built
+        return Ok(Box::new(futures::stream::empty()));
+    }
 
     let (sender, recv) = tokio::sync::mpsc::unbounded_channel();
     let close = std::sync::Arc::new(tokio::sync::Notify::new());
@@ -222,7 +226,7 @@ async fn build_token_stream(prompt: &str, config: Config, exchanges: Vec<Exchang
         drop(on_token);     // move on_tokens into this closure to keep it alive
     });
 
-    return Ok(recv);
+    return Ok(Box::new(tokio_stream::wrappers::UnboundedReceiverStream::new(recv)));
 }
 
 fn is_scrollbar_bottom(exchanges_div: &web_sys::HtmlDivElement, height_hidden: i32) -> bool {
@@ -233,9 +237,9 @@ fn is_scrollbar_bottom(exchanges_div: &web_sys::HtmlDivElement, height_hidden: i
 async fn collect_tokens(
     exchange: RwSignal<Exchange>,
     exchanges_div: &web_sys::HtmlDivElement,
-    mut token_stream: UnboundedReceiver<Result<String>>,
+    mut token_stream: impl futures::Stream<Item = Result<String>> + std::marker::Unpin,
 ) {
-    while let Some(token) = token_stream.recv().await {
+    while let Some(token) = token_stream.next().await {
         match token {
             Ok(token) => {
                 let height_hidden = exchanges_div.scroll_height() - exchanges_div.client_height();

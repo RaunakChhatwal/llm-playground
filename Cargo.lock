@@ -2872,6 +2872,7 @@ dependencies = [
  "strum 0.26.3",
  "strum_macros",
  "tokio",
+ "tokio-stream",
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",

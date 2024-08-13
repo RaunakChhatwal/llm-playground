@@ -41,6 +41,10 @@ fn build_openai_request_body(
 
 // Ok(None) represents response end
 fn parse_openai_response(message: Event) -> Result<Option<String>> {
+    if message.event == "error" {
+        bail!("{}", message.data);
+    }
+
     if message.data.trim() == "[DONE]" {
         return Ok(None);
     }
@@ -93,7 +97,10 @@ fn build_anthropic_request_body(
 
 // Ok(None) represents response end
 fn parse_anthropic_response(message: Event) -> Result<Option<String>> {
-    dbg!(&message);
+    if message.event == "error" {
+        bail!("{}", message.data);
+    }
+
     let response = serde_json::from_str::<Value>(&message.data)
         .context("Error parsing response.")?;
 
@@ -212,15 +219,10 @@ async fn rate_limit<T>(
 }
 
 async fn collect_tokens(
+    cancel: std::sync::Arc<tokio::sync::Notify>,
     mut tokens_stream: impl Stream<Item = Result<Option<String>>> + std::marker::Unpin,
-    window: tauri::Window
-) -> Result<()> {
-    let cancel = std::sync::Arc::new(tokio::sync::Notify::new());
-    let id = window.listen("cancel", {
-        let cancel = cancel.clone();
-        move |_| cancel.notify_one()
-    });
-
+    window: &tauri::Window
+) {
     let mut last_event_timestamp = std::time::Instant::now();
     loop {
         tokio::select! {
@@ -260,10 +262,6 @@ async fn collect_tokens(
             }
         }
     }
-
-    window.unlisten(id);
-
-    Ok(())
 }
 
 fn build_request(
@@ -313,13 +311,22 @@ pub async fn build_token_stream(
     prompt: &str,
     config: Config,
     exchanges: Vec<Exchange>
-) -> Result<(), Error> {
+) -> Result<bool, Error> {
     let api_key_index = config.api_key.ok_or(to_serde_err(anyhow!("No API key selected.")))?;
     let api_key = &config.api_keys[api_key_index];
 
     let request = build_request(api_key, &config, exchanges, prompt).map_err(to_serde_err)?;
-    let response = request.send().await
-        .map_err(|error| Error::new(&error))?;
+
+    let cancel = std::sync::Arc::new(tokio::sync::Notify::new());
+    let cancel_listener_id = window.listen("cancel", {
+        let cancel = cancel.clone();
+        move |_| cancel.notify_one()
+    });
+
+    let response = tokio::select! {
+        response = request.send() => response.map_err(|error| Error::new(&error))?,
+        _ = cancel.notified() => return Ok(true)
+    };
     if response.status() != reqwest::StatusCode::OK {
         return Err(to_serde_err(anyhow!("Invalid status code: {}", response.status())));
     }
@@ -342,7 +349,10 @@ pub async fn build_token_stream(
                 .unwrap_or_else(Err)))
     }
 
-    tokio::spawn(collect_tokens(tokens_stream, window));
+    tokio::spawn(async move {
+        collect_tokens(cancel, tokens_stream, &window).await;
+        window.unlisten(cancel_listener_id);
+    });
 
-    Ok(())
+    Ok(false)
 }

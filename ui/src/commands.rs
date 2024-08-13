@@ -9,7 +9,7 @@ pub async fn build_token_stream(
     prompt: &str,
     config: Config,
     exchanges: Vec<Exchange>
-) -> Result<()> {}
+) -> Result<bool> {}
 
 #[macros::command]
 pub async fn delete_conversation(conversation_uuid: uuid::Uuid) -> Result<()> {}
