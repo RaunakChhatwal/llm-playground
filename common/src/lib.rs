@@ -1,21 +1,20 @@
-use strum_macros::{EnumString, VariantNames};
+use strum_macros::VariantNames;
 use serde::{Deserialize, Serialize};
 
 pub fn to_serde_err(error: anyhow::Error) -> serde_error::Error {
     serde_error::Error::new(&*error)
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, strum_macros::Display, EnumString,
-    Eq, Hash, PartialEq, Serialize, VariantNames)]
+#[derive(Clone, Debug, Deserialize, strum_macros::Display, Eq, Hash, PartialEq, Serialize, VariantNames)]
 pub enum Provider {
-    OpenAI,
+    OpenAI { base_url: String },
     Anthropic,
     Google
 }
 
 impl Default for Provider {
     fn default() -> Self {
-        Provider::OpenAI
+        Provider::OpenAI { base_url: "https://api.openai.com/v1/".into() } 
     }
 }
 

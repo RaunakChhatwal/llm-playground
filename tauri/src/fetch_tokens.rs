@@ -255,8 +255,7 @@ async fn collect_tokens(
                     }
                 }
 
-                // if tokens is Ok(None)
-                if tokens.as_ref().map(Option::is_none).unwrap_or(false) {
+                if let Ok(None) = tokens {
                     break;
                 }
             }
@@ -273,12 +272,12 @@ fn build_request(
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-    let request_builder = match api_key.provider {
-        Provider::OpenAI => {
+    let request_builder = match &api_key.provider {
+        Provider::OpenAI { base_url } => {
             headers.insert("Authorization", HeaderValue::from_str(&format!("Bearer {}", api_key.key))?);
 
             reqwest::Client::new()
-                .post("https://api.openai.com/v1/chat/completions")
+                .post(base_url.to_string() + "/chat/completions")
                 .headers(headers)
                 .body(build_openai_request_body(config, exchanges, prompt).to_string())
         },
@@ -313,7 +312,7 @@ pub async fn build_token_stream(
     exchanges: Vec<Exchange>
 ) -> Result<bool, Error> {
     let api_key_index = config.api_key.ok_or(to_serde_err(anyhow!("No API key selected.")))?;
-    let api_key = &config.api_keys[api_key_index];
+    let api_key = &config.api_keys.get(api_key_index).ok_or(to_serde_err(anyhow!("Invalid selection.")))?;
 
     let request = build_request(api_key, &config, exchanges, prompt).map_err(to_serde_err)?;
 
@@ -333,7 +332,7 @@ pub async fn build_token_stream(
 
     let tokens_stream: Box<dyn Stream<Item = Result<Option<String>>> + std::marker::Unpin + Send>;
     match api_key.provider {
-        Provider::OpenAI => tokens_stream = Box::new(response.bytes_stream()
+        Provider::OpenAI { .. } => tokens_stream = Box::new(response.bytes_stream()
             .eventsource()
             .map(|event| event.map_err(Into::into)
                 .map(parse_openai_response)

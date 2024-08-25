@@ -7,7 +7,8 @@ use leptos::{*, leptos_dom::log};
 use tokio_stream::{StreamExt, wrappers::UnboundedReceiverStream};
 use wasm_bindgen::{JsValue, prelude::*};
 use crate::commands::{add_conversation, delete_conversation, load_exchanges};
-use crate::util::{conversation_uuid, get_conversation_uuid_untracked, listen, set_conversation_uuid, set_conversation_uuid_untracked, Button, ErrorMessage, Menu};
+use crate::util::{conversation_uuid, get_conversation_uuid_untracked, listen, set_conversation_uuid};
+use crate::util::{set_conversation_uuid_untracked, Button, ErrorMessage, Menu};
 
 lazy_static::lazy_static! {
     // anyhow! macro doesn't work if there is a static variable named "error" in the namespace

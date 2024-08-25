@@ -1,6 +1,6 @@
 # LLM Playground
 
-Native desktop app for OpenAI, Anthropic, and Google LLMs written in Rust. Create an API key in the OpenAI or Anthropic playground or https://aistudio.google.com/app/apikey and add it in the settings menu. Conversation history is stored in a local SQLite database.
+Native desktop app for OpenAI, Anthropic, and Google LLMs written in Rust. Create an API key in the OpenAI or Anthropic playground or https://aistudio.google.com/app/apikey and add it in the settings menu. Conversation history is stored in a local SQLite database. OpenAI compatible providers like OpenRouter and Ollama are accessible with the base url option.
 
 ## Showcase
 

@@ -1,4 +1,3 @@
-use std::str::FromStr;
 use common::{APIKey, Config, Provider};
 use leptos::*;
 use strum::VariantNames;
@@ -96,7 +95,7 @@ fn TemperatureSlider(config: RwSignal<Config>) -> impl IntoView {
 }
 
 #[component]
-fn MaxTokensInput(max_tokens: RwSignal<String>,) -> impl IntoView {
+fn MaxTokensInput(max_tokens: RwSignal<String>) -> impl IntoView {
     let on_input = move |event| max_tokens.set(event_target_value(&event));
 
     let max_tokens_input = view! {
@@ -175,9 +174,25 @@ fn KeyEntry(
 }
 
 #[component]
-fn KeyInput(new_key: RwSignal<Option<APIKey>>) -> impl IntoView {
+fn KeyNameInput(new_key: RwSignal<Option<APIKey>>) -> impl IntoView {
+    let on_input = move |event| new_key.update(|new_key| {
+        new_key.as_mut().map(|new_key|
+            new_key.name = event_target_value(&event));
+    });
+
+    view! {
+        <label>"Name:"</label>
+        <input type="text" on:input=on_input
+            class="px-1 bg-[#222222] h-[2em] border border-[#33333A] text-[0.9em]" />
+    }
+}
+
+#[component]
+fn ProviderList(new_key: RwSignal<Option<APIKey>>) -> impl IntoView {
     create_effect(move |_| {
-        let new_provider = new_key().map(|new_key| new_key.provider.to_string());
+        let Some(new_key) = new_key() else {
+            return;
+        };
         for &provider in Provider::VARIANTS {
             let input = document().get_element_by_id(&format!("provider-{}", provider))
                 .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok());
@@ -187,40 +202,85 @@ fn KeyInput(new_key: RwSignal<Option<APIKey>>) -> impl IntoView {
             };
 
             // this is different from setting the input's checked html attribute, which will not work
-            input.set_checked(Some(provider.to_string()) == new_provider);
+            input.set_checked(provider == new_key.provider.to_string());
         }
     });
 
+    view! {
+        <label>"Provider:"</label>
+        <div class="grid grid-cols-[repeat(2,max-content)] items-center">
+            <For each=move || Provider::VARIANTS
+                key=|&provider_name| provider_name
+                children=|&provider_name| view! {
+                    <input type="radio" value=provider_name name="provider"
+                        id=format!("provider-{provider_name}") />
+                    <label class="ml-2">{provider_name}</label>
+                } />
+        </div>
+    }
+}
+
+#[component]
+fn BaseUrlInput(new_key: RwSignal<Option<APIKey>>) -> impl IntoView {
+    let hidden = move || new_key()
+        .map(|new_key| !matches!(new_key.provider, Provider::OpenAI { .. }))
+        .unwrap_or_default();
+
+    let on_input = move |event| new_key.update(|new_key| {
+        let Some(APIKey { provider: Provider::OpenAI { base_url }, .. }) = new_key else {
+            return;
+        };
+        *base_url = event_target_value(&event);
+    });
+
+    let input = view! {
+        <input type="text" on:input=on_input style:display=move || hidden().then(|| "None")
+            class="px-1 bg-[#222222] h-[2em] border border-[#33333A] text-[0.9em]" />
+    };
+
+    create_effect({
+        let input = input.clone();
+        move |_| new_key.with(|new_key| {
+            let Some(APIKey { provider: Provider::OpenAI { base_url }, .. }) = new_key else {
+                return;
+            };
+            input.set_value(&base_url);
+        })
+    });
+
+    view! {
+        <label style:display=move || hidden().then(|| "None")>"Base URL:"</label>
+        {input}
+    }
+}
+
+#[component]
+fn KeyInput(new_key: RwSignal<Option<APIKey>>) -> impl IntoView {
     let on_change = move |event| new_key.update(|new_key| {
-        new_key.as_mut().map(|new_key|
-            new_key.provider = Provider::from_str(&event_target_value(&event)).unwrap_or_default());
+        new_key.as_mut().map(|new_key| match &event_target_value(&event) as &str {
+            "OpenAI" => match new_key.provider {
+                Provider::OpenAI { .. } => (),      // don't override existing base_url
+                _ => new_key.provider = Provider::default()
+            },
+            "Anthropic" => new_key.provider = Provider::Anthropic,
+            "Google" => new_key.provider = Provider::Google,
+            _misc_event => ()
+        });
+    });
+
+    let on_input = move |event| new_key.update(|new_key| {
+        new_key.as_mut().map(|new_key| new_key.key = event_target_value(&event));
     });
 
     view! {
         <div class="grid grid-cols-[repeat(2,max-content)] gap-2 text-[0.9em]" on:change=on_change
                 style:display=move || new_key().is_none().then(|| "None")>
-            <label>"Name:"</label>
-            <input type="text" class="px-1 bg-[#222222] h-[2em] border border-[#33333A] text-[0.9em]"
-                on:input=move |event| new_key.update(|new_key| {
-                    new_key.as_mut().map(|new_key|
-                        new_key.name = event_target_value(&event));
-                }) />
+            <KeyNameInput new_key />
             <label>"Key:"</label>
-            <input type="text" class="px-1 bg-[#222222] h-[2em] border border-[#33333A] text-[0.9em]"
-                on:input=move |event| new_key.update(|new_key| {
-                    new_key.as_mut().map(|new_key|
-                        new_key.key = event_target_value(&event));
-                }) />
-            <label>"Provider:"</label>
-            <div class="grid grid-cols-[repeat(2,max-content)] items-center">
-                <For each=move || Provider::VARIANTS
-                    key=|&provider_name| provider_name
-                    children=|&provider_name| view! {
-                        <input type="radio" value=provider_name name="provider"
-                            id=format!("provider-{provider_name}") />
-                        <label class="ml-2">{provider_name}</label>
-                    } />
-            </div>
+            <input type="text" on:input=on_input
+                class="px-1 bg-[#222222] h-[2em] border border-[#33333A] text-[0.9em]" />
+            <BaseUrlInput new_key />
+            <ProviderList new_key />
         </div>
     }
 }
