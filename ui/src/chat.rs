@@ -7,8 +7,8 @@ use leptos::{*, leptos_dom::log};
 use tokio_stream::{StreamExt, wrappers::UnboundedReceiverStream};
 use wasm_bindgen::{JsValue, prelude::*};
 use crate::commands::{add_conversation, delete_conversation, load_exchanges};
-use crate::util::{conversation_uuid, get_conversation_uuid_untracked, listen, set_conversation_uuid};
-use crate::util::{set_conversation_uuid_untracked, Button, ErrorMessage, Menu};
+use crate::util::{button, conversation_uuid, get_conversation_uuid_untracked, listen};
+use crate::util::{set_conversation_uuid, set_conversation_uuid_untracked, ErrorMessage, Menu};
 
 lazy_static::lazy_static! {
     // anyhow! macro doesn't work if there is a static variable named "error" in the namespace
@@ -289,7 +289,7 @@ async fn set_exchanges(exchanges: Vec<(usize, Exchange)>) {
 }
 
 #[component]
-fn BottomButtons(
+fn Buttons(
     config: RwSignal<Config>,
     menu: RwSignal<Menu>,
     exchanges: RwSignal<Vec<(usize, RwSignal<Exchange>)>>,
@@ -300,7 +300,7 @@ fn BottomButtons(
 ) -> impl IntoView {
     let exchanges_div = std::rc::Rc::new(exchanges_div);
 
-    let on_submit = move || {
+    let on_submit = move |_| {
         let height_hidden = exchanges_div.scroll_height() - exchanges_div.client_height();
         let is_scrollbar_bottom = is_scrollbar_bottom(&exchanges_div, height_hidden);
 
@@ -354,23 +354,25 @@ fn BottomButtons(
         });
     };
 
-    let on_cancel = move || spawn_local(async move {
+    let on_cancel = move |_| spawn_local(async move {
         if let Err(_) = emit("cancel", JsValue::null()).await {
             set_error("Unable to cancel stream.".into());
         }
     });
 
     view! {
-        <Button class="mr-4 md:mr-8" label="New"
-            to_hide=streaming.into() on_click=Box::new(move || set_conversation_uuid(None)) />
-        <Button class="" label="Submit"
-            to_hide=streaming.into() on_click=Box::new(on_submit) />
+        <button class=button() + "mr-4 md:mr-8"
+            on:click=move |_| set_conversation_uuid(None)
+            style:display=move || streaming().then(|| "None")
+        >"New"</button>
+        <button class=button() on:click=on_submit
+            style:display=move || streaming().then(|| "None")
+        >"Submit"</button>
         <div class="flex ml-auto">
-            <Button class="mr-4 md:mr-8" label="Cancel"
-                to_hide=Signal::derive(move || !streaming()) on_click=Box::new(on_cancel) />
-            <Button class="" label="Menu"
-                to_hide=create_signal(false).0.into()
-                on_click=Box::new(move || menu.set(Menu::Menu)) />
+            <button class=button() + "mr-4 md:mr-8" on:click=on_cancel
+                style:display=move || (!streaming()).then(|| "None")
+            >"Cancel"</button>
+            <button class=button() on:click=move |_| menu.set(Menu::Menu)>"Menu"</button>
         </div>
     }
 }
@@ -441,7 +443,7 @@ pub fn Chat(config: RwSignal<Config>, menu: RwSignal<Menu>) -> impl IntoView {
                 </div>
             </div>
             <div class="flex-none md:mx-[10vw] flex md:mx-8">
-                <BottomButtons config menu exchanges exchanges_div new_exchange prompt streaming />
+                <Buttons config menu exchanges exchanges_div new_exchange prompt streaming />
             </div>
         </div>
     }

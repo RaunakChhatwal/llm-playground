@@ -3,12 +3,16 @@ use leptos::*;
 use strum::VariantNames;
 use wasm_bindgen::prelude::*;
 use crate::commands::{load_config, save_config};
-use crate::util::{listen, Button, ErrorMessage, Menu};
+use crate::util::{button, listen, ErrorMessage, Menu};
 
 lazy_static::lazy_static! {
     // anyhow! macro doesn't work if there is a static variable named "error" in the namespace
     pub static ref signal_pair: (ReadSignal<String>, WriteSignal<String>) = create_signal("".into());
     pub static ref set_error: WriteSignal<String> = signal_pair.1;
+}
+
+fn input() -> String {
+    " bg-[#222222] h-[2em] border border-[#33333A] text-[0.9em] ".into()
 }
 
 pub fn update_textarea_height(textarea: &HtmlElement<html::Textarea>) {
@@ -98,10 +102,7 @@ fn TemperatureSlider(config: RwSignal<Config>) -> impl IntoView {
 fn MaxTokensInput(max_tokens: RwSignal<String>) -> impl IntoView {
     let on_input = move |event| max_tokens.set(event_target_value(&event));
 
-    let max_tokens_input = view! {
-        <input type="text" on:input=on_input
-            class="px-2 py-1 bg-[#222222] border border-[#33333A] text-[0.9em]" />
-    };
+    let max_tokens_input = view!(<input type="text" on:input=on_input class=input() + "px-2 py-1" />);
 
     create_effect({
         let max_tokens_input = max_tokens_input.clone();
@@ -123,10 +124,7 @@ fn ModelInput(config: RwSignal<Config>) -> impl IntoView {
     let on_input = move |event| config.update(|config|
         config.model = event_target_value(&event));
 
-    let model_input = view! {
-        <input type="text" on:input=on_input
-            class="px-2 py-1 bg-[#222222] border border-[#33333A] text-[0.9em]" />
-    };
+    let model_input = view!(<input type="text" on:input=on_input class=input() + "px-2 py-1" />);
 
     create_effect({
         let model_input = model_input.clone();
@@ -182,8 +180,7 @@ fn KeyNameInput(new_key: RwSignal<Option<APIKey>>) -> impl IntoView {
 
     view! {
         <label>"Name:"</label>
-        <input type="text" on:input=on_input
-            class="px-1 bg-[#222222] h-[2em] border border-[#33333A] text-[0.9em]" />
+        <input type="text" on:input=on_input class=input() + "px-1" />
     }
 }
 
@@ -234,8 +231,8 @@ fn BaseUrlInput(new_key: RwSignal<Option<APIKey>>) -> impl IntoView {
     });
 
     let input = view! {
-        <input type="text" on:input=on_input style:display=move || hidden().then(|| "None")
-            class="px-1 bg-[#222222] h-[2em] border border-[#33333A] text-[0.9em]" />
+        <input class=input() + "px-1" type="text"
+            on:input=on_input style:display=move || hidden().then(|| "None") />
     };
 
     create_effect({
@@ -277,8 +274,7 @@ fn KeyInput(new_key: RwSignal<Option<APIKey>>) -> impl IntoView {
                 style:display=move || new_key().is_none().then(|| "None")>
             <KeyNameInput new_key />
             <label>"Key:"</label>
-            <input type="text" on:input=on_input
-                class="px-1 bg-[#222222] h-[2em] border border-[#33333A] text-[0.9em]" />
+            <input type="text" on:input=on_input class=input() + "px-1" />
             <BaseUrlInput new_key />
             <ProviderList new_key />
         </div>
@@ -341,8 +337,6 @@ fn KeyList(config: RwSignal<Config>) -> impl IntoView {
         }
     };
 
-    let button_classes = "px-[9px] py-[3px] w-[max-content] border border-[#33333A]
-        bg-[#222222] hover:bg-[#2A2A2A] text-[#AAAABB]";
     view! {
         <div class="col-span-2 grid grid-cols-1 gap-4">
             <h2 class="text-[1.1em] underline">"API Keys"</h2>
@@ -357,11 +351,11 @@ fn KeyList(config: RwSignal<Config>) -> impl IntoView {
             </div>
             <KeyInput new_key />
             <div class="flex">
-                <button class=format!("mr-2 {}", button_classes)
+                <button class=button() + "mr-2 w-[max-content]"
                     style:display=move || new_key().is_none().then(|| "None")
                     on:click=move |_| new_key.set(None)
                 >"Cancel"</button>
-                <button class=button_classes on:click=on_add>"Add"</button>
+                <button class=button() + "w-[max-content]" on:click=on_add>"Add"</button>
             </div>
         </div>
     }
@@ -411,7 +405,7 @@ pub fn Settings(active_config: RwSignal<Config>, menu: RwSignal<Menu>) -> impl I
             Some(config) == saved_config();
     });
 
-    let on_discard = move || {
+    let on_discard = move |_| {
         if let Some(saved_config) = saved_config.get_untracked() {
             config.set(saved_config.clone());
             max_tokens.set(saved_config.max_tokens.to_string());
@@ -421,7 +415,7 @@ pub fn Settings(active_config: RwSignal<Config>, menu: RwSignal<Menu>) -> impl I
         };
     };
 
-    let on_apply = move || {
+    let on_apply = move |_| {
         let max_tokens = match max_tokens.get_untracked().parse::<u32>() {
             Ok(max_tokens) => max_tokens,
             Err(error) => {
@@ -444,11 +438,9 @@ pub fn Settings(active_config: RwSignal<Config>, menu: RwSignal<Menu>) -> impl I
 
     view! {
         <div class="relative flex flex-col items-center mx-auto md:w-[max-content] md:min-w-[60vw]
-                    h-full p-4 md:p-[5vh] overflow-y-hidden text-[0.95em]"
+                h-full p-4 md:p-[5vh] overflow-y-hidden text-[0.95em]"
                 style:display=move || (menu.get() != Menu::Settings).then(|| "None")>
-            <Button class="mr-auto" label="Back"
-                to_hide=create_signal(false).0.into()
-                on_click=Box::new(move || menu.set(Menu::Menu)) />
+            <button class=button() + "mr-auto" on:click=move |_| menu.set(Menu::Menu)>"Back"</button>
             <h1 class="text-[1.25em]">"Settings"</h1>
             <div class="w-full mt-2"><ErrorMessage error /></div>
             <div class="grid grid-cols-[repeat(2,max-content)] gap-[6vh] items-center my-auto overflow-y-auto">
@@ -459,8 +451,12 @@ pub fn Settings(active_config: RwSignal<Config>, menu: RwSignal<Menu>) -> impl I
                 <KeyList config />
             </div>
             <div class="flex justify-end mb-[4vh] md:mb-[8vh] w-full">
-                <Button class="mr-4" label="Discard" to_hide on_click=Box::new(on_discard) />
-                <Button class="" label="Apply" to_hide on_click=Box::new(on_apply) />
+                <button class=button() + "mr-4" on:click=on_discard
+                    style:display=move || to_hide().then(|| "None")
+                >"Discard"</button>
+                <button class=button() on:click=on_apply
+                    style:display=move || to_hide().then(|| "None")
+                >"Apply"</button>
             </div>
         </div>
     }

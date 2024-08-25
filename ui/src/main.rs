@@ -1,6 +1,6 @@
 use leptos::*;
 use crate::chat::Chat;
-use crate::util::{Button, Menu};
+use crate::util::{button, Menu};
 use crate::history::History;
 use crate::settings::Settings;
 
@@ -12,7 +12,6 @@ mod settings;
 
 #[component]
 pub fn Menu(menu: RwSignal<Menu>) -> impl IntoView {
-    let to_hide = create_signal(false).0.into();
     view! {
         <div class="relative flex flex-col h-full"
                 style:display=move || (menu.get() != Menu::Menu).then(|| "None")>
@@ -20,12 +19,15 @@ pub fn Menu(menu: RwSignal<Menu>) -> impl IntoView {
             >"Menu"</h1>
             <div class="grid grid-cols-[50vw] md:grid-cols-[25vw] gap-12 md:gap-16
                 justify-center items-center my-auto">
-                <Button class="md:py-[6px]" label="Chat" to_hide
-                    on_click=Box::new(move || menu.set(Menu::Chat)) />
-                <Button class="md:py-[6px]" label="History" to_hide
-                    on_click=Box::new(move || menu.set(Menu::History)) />
-                <Button class="md:py-[6px]" label="Settings" to_hide
-                    on_click=Box::new(move || menu.set(Menu::Settings)) />
+                <button class=button() + "md:py-[6px]" on:click=move |_| menu.set(Menu::Chat)>
+                    "Chat"
+                </button>
+                <button class=button() + "md:py-[6px]" on:click=move |_| menu.set(Menu::History)>
+                    "History"
+                </button>
+                <button class=button() + "md:py-[6px]" on:click=move |_| menu.set(Menu::Settings)>
+                    "Settings"
+                </button>
             </div>
         </div>
     }

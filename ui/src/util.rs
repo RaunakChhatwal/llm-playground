@@ -18,25 +18,9 @@ pub fn ErrorMessage(error: ReadSignal<String>) -> impl IntoView {
     }
 }
 
-#[component]
-pub fn Button(
-    class: &'static str,
-    label: &'static str,
-    to_hide: Signal<bool>,
-    on_click: Box<dyn Fn()>)
--> impl IntoView {
-    let class = format!("{class}
-        px-[9px] py-[3px] border border-[#33333A] bg-[#222222] hover:bg-[#2A2A2A] text-[#AAAABB]");
-
-    view! {
-        <button
-            class={class}
-            on:click=move |_| on_click()
-            style:display=move || to_hide().then(|| "None")
-        >{label}</button>
-    }
+pub fn button() -> String {
+    " px-[9px] py-[3px] border border-[#33333A] bg-[#222222] hover:bg-[#2A2A2A] text-[#AAAABB] ".into()
 }
-
 
 #[wasm_bindgen]
 extern "C" {
