@@ -6,8 +6,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use common::{to_serde_err, Config, Conversation, Exchange};
 use migration::{Migrator, MigratorTrait};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use sea_orm::{ActiveModelTrait, ColumnTrait, Database, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
-    Set, TransactionTrait};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Database, EntityTrait, IntoActiveModel};
+use sea_orm::{QueryFilter, QueryOrder, Set, TransactionTrait};
 use serde_error::Error;     // necessary for tauri comamnds since anyhow::Error isn't serializable
 use tauri::Manager;
 use fetch_tokens::build_token_stream;
@@ -240,8 +240,7 @@ async fn _set_exchanges(
 
     futures::future::join_all(old_exchanges.into_iter()
         .map(entity::exchanges::Model::into_active_model)
-        .map(|exchange|
-            entity::exchanges::Entity::delete(exchange).exec(&txn))
+        .map(|exchange| entity::exchanges::Entity::delete(exchange).exec(&txn))
     ).await.into_iter().collect::<Result<Vec<_>, _>>()?;
 
     txn.commit().await?;
@@ -260,8 +259,8 @@ async fn set_exchanges(
 fn watch_file(app: tauri::AppHandle, event_name: &'static str, file: &Path) -> Result<()> {
     let (sender, recv) = std::sync::mpsc::channel::<Result<notify::Event, notify::Error>>();
 
-    let emit = move || app.emit_all(event_name, ()).unwrap_or_else(|error|
-        eprintln!("Error triggering {event_name}: {error}"));
+    let emit = move || app.emit_all(event_name, ())
+        .unwrap_or_else(|error| eprintln!("Error triggering {event_name}: {error}"));
 
     std::thread::spawn(move || loop {
         let event= match recv.recv() {
@@ -294,6 +293,11 @@ fn watch_file(app: tauri::AppHandle, event_name: &'static str, file: &Path) -> R
     Ok(())
 }
 
+async fn watch_config_and_conversations(app: tauri::AppHandle) -> Result<()> {
+    watch_file(app.clone(), "config_updated", &config_dir().await?.join("config.json"))?;
+    watch_file(app, "conversations_updated", &config_dir().await?.join("conversations.db"))
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     if !&config_dir().await?.join("config.json").exists() {
@@ -306,12 +310,7 @@ async fn main() -> Result<()> {
     tauri::Builder::default()
         .setup(|app| {
             let app = app.handle();
-            futures::executor::block_on(tokio::spawn(async {
-                watch_file(app.clone(), "config_updated", &config_dir().await?.join("config.json"))?;
-                watch_file(app, "conversations_updated", &config_dir().await?.join("conversations.db"))?;
-
-                Ok::<(), anyhow::Error>(())
-            })).unwrap_or_else(|error| Err(error.into())).map_err(Into::into)
+            futures::executor::block_on(watch_config_and_conversations(app)).map_err(Into::into)
         })
         .invoke_handler(tauri::generate_handler![
             add_conversation,

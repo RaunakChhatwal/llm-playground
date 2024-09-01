@@ -55,3 +55,12 @@ pub fn set_conversation_uuid_untracked(uuid: Option<uuid::Uuid>) {
         conversation_uuid.set_untracked(uuid);
     }
 }
+
+pub fn update_textarea_height(textarea: &web_sys::HtmlTextAreaElement) {
+    // textarea.set_attribute("style", "height: auto;").expect("Textareas support the style attribute");
+    // let style = format!("height: {}px;", textarea.scroll_height());
+    // textarea.set_attribute("style", &style).expect("Textareas support the style attribute");
+    let _ = textarea.set_attribute("style", "height: auto;");
+    let style = format!("height: {}px;", textarea.scroll_height());
+    let _ = textarea.set_attribute("style", &style);
+}

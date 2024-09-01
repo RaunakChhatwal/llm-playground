@@ -3,7 +3,7 @@ use leptos::*;
 use strum::VariantNames;
 use wasm_bindgen::prelude::*;
 use crate::commands::{load_config, save_config};
-use crate::util::{button, listen, ErrorMessage, Menu};
+use crate::util::{button, listen, update_textarea_height, ErrorMessage, Menu};
 
 lazy_static::lazy_static! {
     // anyhow! macro doesn't work if there is a static variable named "error" in the namespace
@@ -13,14 +13,6 @@ lazy_static::lazy_static! {
 
 fn input() -> String {
     " bg-[#222222] h-[2em] border border-[#33333A] text-[0.9em] ".into()
-}
-
-pub fn update_textarea_height(textarea: &HtmlElement<html::Textarea>) {
-    textarea.set_attribute("style", "height: auto;")
-        .unwrap_or_else(|error| set_error(format!("{error:?}")));
-    let style = format!("height: {}px;", textarea.scroll_height());
-    textarea.set_attribute("style", &style)
-        .unwrap_or_else(|error| set_error(format!("{error:?}")));
 }
 
 #[component]

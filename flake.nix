@@ -13,10 +13,8 @@
 
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
-      inputs = {
-        nixpkgs.follows = "nixpkgs";
-        flake-utils.follows = "flake-utils";
-      };
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-utils.follows = "flake-utils";
     };
   };
 
@@ -38,7 +36,7 @@
         # our specific toolchain there.
         craneLib = (crane.mkLib pkgs).overrideToolchain rustWithWasmTarget;
 
-        buildInputs = with pkgs; ([
+        _buildInputs = with pkgs; ([
           openssl
           zlib
           at-spi2-atk
@@ -56,6 +54,21 @@
           darwin.apple_sdk.frameworks.Cocoa
         ]));
 
+        _nativeBuildInputs = with pkgs; [
+          cargo-tauri
+          trunk
+          wasm-bindgen-cli
+          tailwindcss
+          python3
+          pkg-config
+        ];
+
+        XDG_DATA_DIRS = pkgs.lib.concatStringsSep ":" (with pkgs; [
+          "${gsettings-desktop-schemas}/share/gsettings-schemas/${gsettings-desktop-schemas.name}"
+          "${gtk3}/share/gsettings-schemas/${gtk3.name}"
+          "$XDG_DATA_DIRS"
+        ]);
+
         llm-playground = craneLib.mkCargoDerivation (with pkgs; rec {
           pname = "llm-playground";
           version = "0.1.0";
@@ -71,15 +84,10 @@
             cargo-tauri build || [[ -e ./target/release/llm-playground ]]
           '';
 
-          libPath = lib.makeLibraryPath buildInputs;
-          XDG_DATA_DIRS = lib.concatStringsSep ":" [
-            "${gsettings-desktop-schemas}/share/gsettings-schemas/${gsettings-desktop-schemas.name}"
-            "${gtk3}/share/gsettings-schemas/${gtk3.name}"
-            "$XDG_DATA_DIRS"];
           installPhase = if stdenv.isLinux then ''
             mkdir -p $out/bin
             mv ./target/release/llm-playground $out/bin
-            patchelf --set-rpath ${libPath} \
+            patchelf --set-rpath ${lib.makeLibraryPath buildInputs} \
               --set-interpreter $(cat $NIX_CC/nix-support/dynamic-linker) \
               $out/bin/llm-playground
             mv ./bundle/share $out
@@ -104,18 +112,11 @@
           doInstallCargoArtifacts = false;
           cargoArtifacts = ./.;
 
-          nativeBuildInputs = with pkgs; [
-            cargo-tauri
-            trunk
-            wasm-bindgen-cli
-            tailwindcss
-            python3
-            pkg-config
-          ] ++ (if stdenv.isLinux then [
-            autoPatchelfHook    # this hook breaks on macos due to mach-o
-          ] else []);
+          buildInputs = _buildInputs;
 
-          inherit buildInputs;
+          nativeBuildInputs = _nativeBuildInputs ++
+            # autoPatchelfHook breaks on macos due to mach-o
+            (lib.optionals stdenv.isLinux [ autoPatchelfHook ]);
         });
       in {
         checks = {
@@ -124,13 +125,20 @@
 
         packages.default = llm-playground;
 
-        devShells.default = pkgs.mkShell (with pkgs; {
-          buildInputs = buildInputs ++ [
-            trunk
-            tailwindcss
-            wasm-bindgen-cli
-            pkg-config
-          ];
+        devShells.default = pkgs.mkShell (with pkgs; rec {
+          buildInputs = _buildInputs ++ _nativeBuildInputs;
+
+          LD_LIBRARY_PATH = lib.makeLibraryPath (buildInputs ++ [
+            # these are dependencies which are loaded dynamically
+            glib-networking libsoup gdk-pixbuf cairo gtk4 glib
+          ]);
+
+          inherit XDG_DATA_DIRS;
+
+          shellHook = ''
+            export GIO_MODULE_DIR="${glib-networking}/lib/gio/modules/";
+            PS1="\[\e[1;32m\]\u \W> \[\e[0m\]"
+          '';
         });
       }
     );

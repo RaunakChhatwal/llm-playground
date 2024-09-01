@@ -7,7 +7,7 @@ use leptos::{*, leptos_dom::log};
 use tokio_stream::{StreamExt, wrappers::UnboundedReceiverStream};
 use wasm_bindgen::{JsValue, prelude::*};
 use crate::commands::{add_conversation, delete_conversation, load_exchanges};
-use crate::util::{button, conversation_uuid, get_conversation_uuid_untracked, listen};
+use crate::util::{button, conversation_uuid, get_conversation_uuid_untracked, listen, update_textarea_height};
 use crate::util::{set_conversation_uuid, set_conversation_uuid_untracked, ErrorMessage, Menu};
 
 lazy_static::lazy_static! {
@@ -24,14 +24,6 @@ async fn sleep(duration: Duration) {
     }, duration);
 
     recv.await.unwrap_or_else(|error| log!("Unable to sleep: {error}"));
-}
-
-pub fn update_textarea_height(textrea: &web_sys::HtmlTextAreaElement) -> Result<()> {
-    textrea.set_attribute("style", "height: auto;")
-        .map_err(|error| anyhow!("{error:?}"))?;
-    let style = format!("height: {}px;", textrea.scroll_height());
-    textrea.set_attribute("style", &style)
-        .map_err(|error| anyhow!("{error:?}"))
 }
 
 #[component]
@@ -53,8 +45,7 @@ fn MessageBox(
         let message_box = message_box.clone();
         move |event| {
             set_content(event_target_value(&event));
-            update_textarea_height(&message_box).unwrap_or_else(|error|
-                set_error(format!("Unable to update message box height: {error:?}")));
+            update_textarea_height(&message_box);
         }
     });
     message_box.set_oninput(Some(on_input.as_ref().unchecked_ref()));
@@ -66,8 +57,7 @@ fn MessageBox(
         move |_| content.with(|message| {
             // this is different from setting the textarea's value html attribute, which will not work
             message_box.set_value(&message);
-            update_textarea_height(&message_box).unwrap_or_else(|error|
-                set_error(format!("Unable to update message box height: {error:?}")));
+            update_textarea_height(&message_box);
         })
     });
 
@@ -131,6 +121,7 @@ fn Exchanges(
     new_exchange: RwSignal<Exchange>,
     exchanges: RwSignal<Vec<(usize, RwSignal<Exchange>)>>,
     update_heights: Arc<tokio::sync::Notify>,
+    response_textbox: HtmlElement<html::P>,
     streaming: RwSignal<bool>
 ) -> impl IntoView {
     let on_resize = Closure::<dyn Fn() + 'static>::new({
@@ -143,8 +134,8 @@ fn Exchanges(
             join!(update_heights.notified(), sleep(Duration::from_millis(250)));
             exchanges.with_untracked(|exchanges| exchanges.iter()
                 .flat_map(|(key, _)| vec![2*key, 2*key + 1])
-                .map(|id| update_textarea_height(&get_message_box_by_id(id)?))
-                .collect::<Result<(), _>>()
+                .map(|id| Ok(update_textarea_height(&get_message_box_by_id(id)?)))
+                .collect::<Result<()>>()
             ).unwrap_or_else(|error| log!("Unable to update message box sizes: {error}"));
         }
     });
@@ -152,13 +143,13 @@ fn Exchanges(
     window().set_onresize(Some(on_resize.as_ref().unchecked_ref()));
     std::mem::forget(on_resize);
 
+    let margin_top = move |key| exchanges().get(0).and_then(|(_key, _)| (key != *_key).then(|| "12px"));
     view! {
         <div class="flex flex-col">
             <For each=exchanges
                 key=|(key, _)| *key
                 children=move |(key, exchange)| view! {
-                    <div style:margin-top=move || exchanges().get(0)
-                            .and_then(|(_key, _)| (key != *_key).then(|| "12px"))>
+                    <div style:margin-top=move || margin_top(key)>
                         <ExchangeComponent key exchange exchanges />
                     </div>
                 } />
@@ -167,17 +158,17 @@ fn Exchanges(
             style:margin-top=move || (!exchanges().is_empty()).then(|| "12px")
             style:display=move || (!streaming()).then(|| "None")
         >{move || new_exchange().user_message}</p>
-        <p class="mt-[12px] px-2 py-1 min-h-[2em] bg-[#222222] border border-[#303038] text-[0.9em]"
-            style:display=move || (!streaming()).then(|| "None")
-        >{move || new_exchange().assistant_message}</p>
+        {response_textbox}
     }
 }
 
 fn deserialize_event(event: JsValue) -> Result<Option<String>> {
-    let parsed_event = JsValue::into_serde::<serde_json::Map<String, serde_json::Value>>(&event)?;
-    let payload = parsed_event.get("payload").ok_or(anyhow!("Unable to deserialize token."))?;
+    let mut parsed_event = JsValue::into_serde::<serde_json::Map<String, serde_json::Value>>(&event)?;
+    let Some(serde_json::Value::Object(mut payload)) = parsed_event.remove("payload") else {
+        bail!("Unable to deserialize token.");
+    };
 
-    if let Some(token) = payload.get("Ok") {
+    if let Some(token) = payload.remove("Ok") {
         if token.is_null() {
             return Ok(None);    // signals end of response
         }
@@ -185,8 +176,8 @@ fn deserialize_event(event: JsValue) -> Result<Option<String>> {
         if let Some(token) = token.as_str() {
             return Ok(Some(token.into()));
         }
-    } else if let Some(error) = payload.get("Err") {
-        if let Ok(error) = serde_json::from_value::<serde_error::Error>(error.clone()) {
+    } else if let Some(error) = payload.remove("Err") {
+        if let Ok(error) = serde_json::from_value::<serde_error::Error>(error) {
             return Err(error.into());
         }
     }
@@ -211,7 +202,7 @@ async fn build_token_stream(prompt: &str, config: Config, exchanges: Vec<Exchang
             match deserialize_event(event) {
                 Ok(Some(token)) => drop(sender.send(Ok(token))),
                 Ok(None) => close.notify_one(),
-                Err(error) => drop(sender.send(Err(error))),
+                Err(error) => drop(sender.send(Err(error)))
             }
         })
     };
@@ -230,30 +221,72 @@ async fn build_token_stream(prompt: &str, config: Config, exchanges: Vec<Exchang
     return Ok(Box::new(UnboundedReceiverStream::new(recv)));
 }
 
-fn is_scrollbar_bottom(exchanges_div: &web_sys::HtmlDivElement, height_hidden: i32) -> bool {
-    let tolerance = 5;
-    return (height_hidden - exchanges_div.scroll_top()).abs() < tolerance;
+const TOLERANCE: i32 = 5;
+fn is_scrollbar_bottom(exchanges_div: &web_sys::HtmlDivElement) -> bool {
+    let height_hidden = exchanges_div.scroll_height() - exchanges_div.client_height();
+    return (height_hidden - exchanges_div.scroll_top()).abs() < TOLERANCE;
 } 
+
+// the bezier defined by (3/4, 3/4), (1, 1), and (5/4, 1), not parameterized
+fn deceleration_bezier(x: f64) -> f64 {
+    -x*x + 2.5*x - 0.5625
+}
+
+// the percentage of visible height taken up by the response text box
+fn calculate_visibility(
+    exchanges_div: &web_sys::HtmlDivElement,
+    response_textbox: &web_sys::HtmlParagraphElement
+) -> f64 {
+    let mut visible_height = exchanges_div.scroll_top() + exchanges_div.client_height();
+    visible_height -= exchanges_div.scroll_height() - response_textbox.client_height();
+    (visible_height as f64)/(exchanges_div.client_height() as f64)
+}
 
 async fn collect_tokens(
     exchange: RwSignal<Exchange>,
     exchanges_div: &web_sys::HtmlDivElement,
+    response_textbox: &web_sys::HtmlParagraphElement,
     mut token_stream: impl Stream<Item = Result<String>> + Unpin,
 ) {
+    let mut visibility = calculate_visibility(exchanges_div, response_textbox);
     while let Some(token) = token_stream.next().await {
-        match token {
-            Ok(token) => {
-                let height_hidden = exchanges_div.scroll_height() - exchanges_div.client_height();
-                let is_scrollbar_bottom = is_scrollbar_bottom(&exchanges_div, height_hidden);
-                exchange.update(|exchange| exchange.assistant_message.push_str(&token));
-                if is_scrollbar_bottom {
-                    exchanges_div.set_scroll_top(exchanges_div.scroll_height() - exchanges_div.client_height());
-                }
-            },
+        let token = match token {
+            Ok(token) => token,
             Err(error) => {
                 set_error(error.to_string());
                 break;
             }
+        };
+        let is_scrollbar_bottom = is_scrollbar_bottom(&exchanges_div);
+        // detatch if the current visibility isn't what it last was - i.e. if the user scrolls off
+        let autoscroll = approx::AbsDiffEq::abs_diff_eq(&visibility,
+            &calculate_visibility(exchanges_div, response_textbox),
+            (TOLERANCE as f64)/(exchanges_div.client_height() as f64)
+        );
+
+        exchange.update(|exchange| exchange.assistant_message.push_str(&token));
+
+        let x = (response_textbox.scroll_height() as f64)/(exchanges_div.client_height() as f64);
+        if x < 0.75 {
+            visibility = x;
+            if autoscroll {
+                // autoscroll normally
+                let scroll_top = exchanges_div.scroll_height() - exchanges_div.client_height();
+                exchanges_div.set_scroll_top(scroll_top);
+            }
+        } else if x < 1.25 && autoscroll {
+            // autoscroll with deceleration
+            let response_scroll_top =
+                exchanges_div.scroll_height() - response_textbox.client_height();
+            let offset = (exchanges_div.client_height() as f64)*(1.0 - deceleration_bezier(x));
+            let scroll_top = i32::clamp(response_scroll_top - offset.round() as i32, 0,
+                exchanges_div.scroll_height() - exchanges_div.client_height());
+            exchanges_div.set_scroll_top(scroll_top);
+            visibility = calculate_visibility(exchanges_div, response_textbox);
+        } else if is_scrollbar_bottom {
+            // autoscroll normally
+            let scroll_top = exchanges_div.scroll_height() - exchanges_div.client_height();
+            exchanges_div.set_scroll_top(scroll_top);
         }
     }
 }
@@ -291,18 +324,20 @@ async fn set_exchanges(exchanges: Vec<(usize, Exchange)>) {
 #[component]
 fn Buttons(
     config: RwSignal<Config>,
-    menu: RwSignal<Menu>,
     exchanges: RwSignal<Vec<(usize, RwSignal<Exchange>)>>,
     exchanges_div: HtmlElement<html::Div>,
+    menu: RwSignal<Menu>,
     new_exchange: RwSignal<Exchange>,
     prompt: RwSignal<String>,
+    response_textbox: HtmlElement<html::P>,
     streaming: RwSignal<bool>,
 ) -> impl IntoView {
     let exchanges_div = std::rc::Rc::new(exchanges_div);
+    let response_textbox = std::rc::Rc::new(response_textbox);
 
     let on_submit = move |_| {
-        let height_hidden = exchanges_div.scroll_height() - exchanges_div.client_height();
-        let is_scrollbar_bottom = is_scrollbar_bottom(&exchanges_div, height_hidden);
+        let is_scrollbar_bottom = is_scrollbar_bottom(&exchanges_div);
+        // let is_scrollbar_bottom = (height_hidden - exchanges_div.scroll_top()).abs() < TOLERANCE;
 
         streaming.set(true);
         set_error("".to_string());
@@ -323,9 +358,15 @@ fn Buttons(
         }
 
         let exchanges_div = exchanges_div.clone();
+        let response_textbox = response_textbox.clone();
         spawn_local(async move {
             match build_token_stream(&_prompt, config.get_untracked(), _exchanges).await {
-                Ok(token_stream) => collect_tokens(new_exchange, exchanges_div.as_ref(), token_stream).await,
+                Ok(token_stream) => collect_tokens(
+                    new_exchange,
+                    exchanges_div.as_ref(),
+                    response_textbox.as_ref(),
+                    token_stream
+                ).await,
                 Err(error) => set_error(error.to_string())
             }
 
@@ -422,10 +463,17 @@ pub fn Chat(config: RwSignal<Config>, menu: RwSignal<Menu>) -> impl IntoView {
         format!("{} {}", classes, (exchanges().is_empty() && !streaming()).then(|| "mb-auto")
             .unwrap_or("mt-auto mb-4 md:mb-8"));
 
+    let response_textbox = view! {
+        <p style:display=move || (!streaming()).then(|| "None")
+            class="mt-[12px] px-2 py-1 min-h-[2em] bg-[#222222] border border-[#303038] text-[0.9em]"
+        >{move || new_exchange().assistant_message}</p>
+    };
+
     let exchanges_div = view! {
         <div id="exchanges" class="mb-4 md:mx-[15vw] overflow-y-auto"
                 style:display=move || (exchanges().is_empty() && !streaming()).then(|| "None")>
-            <Exchanges new_exchange exchanges update_heights streaming />
+            <Exchanges new_exchange exchanges update_heights
+                response_textbox=response_textbox.clone() streaming />
         </div>
     };
 
@@ -443,7 +491,7 @@ pub fn Chat(config: RwSignal<Config>, menu: RwSignal<Menu>) -> impl IntoView {
                 </div>
             </div>
             <div class="flex-none md:mx-[10vw] flex md:mx-8">
-                <Buttons config menu exchanges exchanges_div new_exchange prompt streaming />
+                <Buttons config exchanges exchanges_div menu new_exchange prompt response_textbox streaming />
             </div>
         </div>
     }
