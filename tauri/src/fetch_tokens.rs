@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use common::{APIKey, Config, Exchange, Provider, to_serde_err};
 use eventsource_stream::{Event, Eventsource};
-use futures::{Stream, StreamExt};
+use futures::{FutureExt, Stream, StreamExt};
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
 use serde_error::Error;
 use serde_json::{json, Value};
@@ -11,32 +11,44 @@ fn build_openai_request_body(
     exchanges: Vec<Exchange>,
     prompt: &str
 ) -> serde_json::Value {
-    let messages = exchanges.iter()
-        .flat_map(|exchange| vec![
-            json!({
-                "role": "user",
-                "content": exchange.user_message
-            }),
-            json!({
-                "role": "assistant",
-                "content": exchange.assistant_message
-            })
-        ])
-        .chain(std::iter::once(json!({
+    let mut messages = vec![];
+    if !config.system_prompt.is_empty() {
+        messages.push(json!({
+            "role": "system",
+            "content": config.system_prompt
+        }));
+    }
+    for exchange in exchanges {
+        messages.push(json!({
             "role": "user",
-            "content": prompt
-        })));
+            "content": exchange.user_message
+        }));
+        messages.push(json!({
+            "role": "assistant",
+            "content": exchange.assistant_message
+        }));
+    }
+    messages.push(json!({
+        "role": "user",
+        "content": prompt
+    }));
 
     return json!({
         "model": config.model,
-        "max_tokens": config.max_tokens,
+        "max_completion_tokens": config.max_tokens,
         "temperature": config.temperature,
-        "stream": true,
-        "messages": std::iter::once(json!({
-            "role": "system",
-            "content": config.system_prompt
-        })).chain(messages).collect::<Vec<Value>>()
+        "stream": !config.model.starts_with("o1"),  // TODO: change to true when o1 supports streaming
+        "messages": messages
     });
+}
+
+fn parse_openai_nonstreaming_response(response_text: String) -> Result<String> {
+    let response = serde_json::from_str::<Value>(&response_text)
+        .context("Error parsing response.")?;
+
+    return response["choices"][0]["message"]["content"].as_str()
+        .map(str::to_string)
+        .ok_or(anyhow!("Error parsing response."));
 }
 
 // Ok(None) represents response end
@@ -140,7 +152,7 @@ fn build_google_request_body(
     return json!({
         "generation_config": {
             "temperature": config.temperature,
-            "maxOutputTokens": config.max_tokens
+            "max_output_tokens": config.max_tokens
         },
         "system_instruction": {
             "parts": [{ "text": config.system_prompt }]
@@ -327,25 +339,27 @@ pub async fn build_token_stream(
         _ = cancel.notified() => return Ok(true)
     };
     if response.status() != reqwest::StatusCode::OK {
-        return Err(to_serde_err(anyhow!("Invalid status code: {}", response.status())));
+        return Err(to_serde_err(anyhow!("Invalid status code: {}: {}", response.status(),
+            response.text().await.unwrap_or_else(|error| error.to_string()))));
     }
 
     let tokens_stream: Box<dyn Stream<Item = Result<Option<String>>> + std::marker::Unpin + Send>;
     match api_key.provider {
+        // TODO: delete this spaghetti once o1 supports streaming
+        Provider::OpenAI { .. } if config.model.starts_with("o1") => {
+            let response_future = Box::pin(response.text().map(|result|
+                result.map_err(Into::into).and_then(parse_openai_nonstreaming_response).map(Some)));
+            tokens_stream = Box::new(futures::stream::once(response_future)
+                .chain(futures::stream::once(std::future::ready(Ok(None)))));
+        },
         Provider::OpenAI { .. } => tokens_stream = Box::new(response.bytes_stream()
             .eventsource()
-            .map(|event| event.map_err(Into::into)
-                .map(parse_openai_response)
-                .unwrap_or_else(Err))),
+            .map(|event| event.map_err(Into::into).map(parse_openai_response).unwrap_or_else(Err))),
         Provider::Anthropic => tokens_stream = Box::new(response.bytes_stream()
             .eventsource()
-            .map(|event| event.map_err(Into::into)
-                .map(parse_anthropic_response)
-                .unwrap_or_else(Err))),
+            .map(|event| event.map_err(Into::into).map(parse_anthropic_response).unwrap_or_else(Err))),
         Provider::Google => tokens_stream = Box::new(response.bytes_stream()
-            .map(|event| event.map_err(Into::into)
-                .map(parse_google_response)
-                .unwrap_or_else(Err)))
+            .map(|event| event.map_err(Into::into).map(parse_google_response).unwrap_or_else(Err)))
     }
 
     tokio::spawn(async move {
